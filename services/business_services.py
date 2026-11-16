@@ -72,7 +72,7 @@ class CitaService:
 
     def reprogramar_cita(self, cita_id: int, nueva_fecha: str, nueva_hora: str) -> Dict[str, Any]:
         """RF03: Reprogramar cita validando disponibilidad."""
-        cita = self.cita_dao.find_id(cita_id)
+        cita = self.cita_dao.find_by_id(cita_id)
         if not cita:
             return {"success": False, "error": "Cita no encontrada"}
 

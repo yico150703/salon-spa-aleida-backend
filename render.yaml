@@ -1,0 +1,22 @@
+databases:
+  - name: spa-aleida-db
+    databaseName: spa_aleida
+    user: spa_user
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: spa-aleida-api
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: spa-aleida-db
+          property: connectionString

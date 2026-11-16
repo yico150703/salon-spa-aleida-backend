@@ -7,6 +7,7 @@ Conforme al Patrón MVC y Sección 3.8.1 del Documento de Arquitectura
 """
 
 from flask import Blueprint, jsonify, request
+from database import is_postgres, get_connection
 from daos.repositories import (
     ClienteDAO, CitaDAO, VentaDAO, CajaDAO,
     ProductoDAO, CompraDAO, ServicioDAO, UsuarioDAO
@@ -36,12 +37,34 @@ reporte_service = ReporteService(cita_dao, venta_dao, caja_dao)
 def health():
     return jsonify({
         "status": "Online",
-        "arquitectura": "4 Capas (Presentación -> Control/Negocio -> Acceso a Datos DAO -> Base de Datos)",
+        "motor_bd": "PostgreSQL (Render)" if is_postgres() else "SQLite (Local Fallback)",
+        "arquitectura": "4 Capas (Presentación -> Control/Negocio -> Acceso a Datos DAO -> Base de Datos PostgreSQL)",
         "patron": "MVC + DAO Composite",
         "casos_de_uso": 9,
         "requerimientos_funcionales": 12,
         "objetivos_smart": 4
     })
+
+@api_bp.route("/db-status", methods=["GET"])
+def db_status():
+    try:
+        conn = get_connection()
+        engine = "PostgreSQL en Render" if is_postgres() else "SQLite Local"
+        conn.close()
+        return jsonify({
+            "status": "Connected",
+            "motor": engine,
+            "clientes_count": len(cliente_dao.find_all()),
+            "citas_count": len(cita_dao.find_all()),
+            "ventas_count": len(venta_dao.find_all()),
+            "servicios_count": len(servicio_dao.find_all()),
+            "productos_count": len(producto_dao.find_all())
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "Error",
+            "error": str(e)
+        }), 500
 
 # INSPECTOR DIDÁCTICO DE ARQUITECTURA
 @api_bp.route("/arquitectura/trace", methods=["GET"])

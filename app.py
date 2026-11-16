@@ -9,9 +9,16 @@ Organizado bajo Arquitectura por Capas (MVC + DAO) conforme a la Sección 3.8
 import os
 from flask import Flask, jsonify
 from flask_cors import CORS
+from database import init_db
 from controllers.routes import api_bp
 
 def create_app():
+    # Inicializar Base de Datos (PostgreSQL en Render o SQLite local)
+    try:
+        init_db()
+    except Exception as e:
+        print(f"[WARN] Error inicializando base de datos: {e}")
+
     app = Flask(__name__)
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     
