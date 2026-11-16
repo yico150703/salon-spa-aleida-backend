@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logger = logging.getLogger("spa_database")
 logging.basicConfig(level=logging.INFO)
