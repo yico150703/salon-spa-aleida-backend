@@ -10,6 +10,9 @@ import os
 import sqlite3
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger("spa_database")
 logging.basicConfig(level=logging.INFO)
