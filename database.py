@@ -23,19 +23,45 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+_pg_pool = None
+
+class _PooledConnWrapper:
+    def __init__(self, raw_conn, pool):
+        self._conn = raw_conn
+        self._pool = pool
+
+    def close(self):
+        if self._pool and self._conn:
+            try:
+                self._pool.putconn(self._conn)
+            except Exception:
+                pass
+            self._conn = None
+
+    def __getattr__(self, item):
+        return getattr(self._conn, item)
+
 def is_postgres():
     return bool(DATABASE_URL)
 
 def get_connection():
-    """Retorna una conexión activa a PostgreSQL (en Render) o SQLite (en local)."""
+    """Retorna una conexión activa a PostgreSQL (en Render con Connection Pool) o SQLite (en local)."""
+    global _pg_pool
     if is_postgres():
         import psycopg2
-        import psycopg2.extras
-        # En Render las conexiones requieren SSL
-        sslmode = os.environ.get("PGSSLMODE", "require") if "render.com" in DATABASE_URL else "prefer"
-        conn = psycopg2.connect(DATABASE_URL, sslmode=sslmode)
-        conn.autocommit = True
-        return conn
+        import psycopg2.pool
+        if _pg_pool is None:
+            sslmode = os.environ.get("PGSSLMODE", "require") if "render.com" in DATABASE_URL else "prefer"
+            _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL, sslmode=sslmode)
+        try:
+            raw_conn = _pg_pool.getconn()
+            raw_conn.autocommit = True
+            return _PooledConnWrapper(raw_conn, _pg_pool)
+        except Exception:
+            sslmode = os.environ.get("PGSSLMODE", "require") if "render.com" in DATABASE_URL else "prefer"
+            conn = psycopg2.connect(DATABASE_URL, sslmode=sslmode)
+            conn.autocommit = True
+            return conn
     else:
         db_path = os.path.join(os.path.dirname(__file__), "spa_aleida.db")
         conn = sqlite3.connect(db_path, check_same_thread=False)
