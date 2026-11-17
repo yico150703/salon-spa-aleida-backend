@@ -167,6 +167,12 @@ def post_anulacion():
 def get_caja():
     return jsonify(caja_service.obtener_estado_caja())
 
+@api_bp.route("/caja/apertura", methods=["POST"])
+def post_apertura():
+    data = request.json or {}
+    res = caja_service.aperturar_caja(data)
+    return jsonify(res), (200 if res.get("success") else 400)
+
 @api_bp.route("/caja/egreso", methods=["POST"])
 def post_egreso():
     data = request.json or {}
@@ -177,7 +183,8 @@ def post_egreso():
 def post_cierre():
     data = request.json or {}
     conteo_fisico = float(data.get("conteo_fisico", 0.0))
-    res = caja_service.realizar_arqueo_y_cierre(conteo_fisico)
+    responsable = data.get("responsable", "Personal de Caja")
+    res = caja_service.realizar_arqueo_y_cierre(conteo_fisico, responsable)
     return jsonify(res), 200
 
 # CU06: Compras e Insumos [RF09]

@@ -173,43 +173,62 @@ class VentaService:
 
     def anular_venta(self, data: dict) -> Dict[str, Any]:
         """RF06: Anulación controlada con motivo obligatorio, PIN gerencial y Nota de Crédito."""
-        pin = data.get("pin", "")
+        pin = str(data.get("pin", "")).strip()
         if pin != "1234":
-            return {"success": False, "error": "Acceso denegado: PIN de autorización gerencial incorrecto."}
+            return {"success": False, "error": "Acceso denegado: PIN de autorización gerencial incorrecto (requiere PIN 1234)."}
 
-        boleta = data.get("boleta", "B001-0004821")
-        motivo = data.get("motivo", "").strip()
+        boleta = str(data.get("boleta", "")).strip()
+        motivo = str(data.get("motivo", "")).strip()
         if not motivo:
             return {"success": False, "error": "Debe especificar el motivo obligatorio de anulación."}
 
-        monto = float(data.get("monto", 520.0))
+        # Buscar venta registrada si existe para heredar datos fiscales
+        venta = self.venta_dao.find_by_ticket(boleta) if boleta else None
+        monto = float(data.get("monto", venta.total if venta else 280.0))
+        cliente = data.get("cliente", venta.cliente if venta else "Cliente General")
+        medio_pago = data.get("medio_pago", venta.medio_pago if venta else "Digital")
+
         nc_num = f"NC-{len(self.venta_dao.get_anulaciones()) + 13:03d}"
 
         anulacion = {
-            "boleta": boleta,
+            "boleta": boleta or f"B001-{len(self.venta_dao.get_anulaciones()) + 4820}",
             "nota_credito": nc_num,
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "monto": monto,
             "motivo": motivo,
-            "autorizado_por": "Aleida Mendoza (Gerente General)"
+            "autorizado_por": data.get("autorizado_por", "Aleida Mendoza (Gerente General)"),
+            "cliente": cliente
         }
         self.venta_dao.save_anulacion(anulacion)
 
-        # Reversión contable en caja (CU04 & CU05)
+        # Actualizar estado de la venta en base de datos
+        if boleta:
+            self.venta_dao.update_estado_anulada(boleta, nc_num)
+
+        # Reversión contable en caja según medio de pago (CU04 & CU05)
         caja = self.caja_dao.get_caja_actual()
-        caja.digital = max(0.0, caja.digital - monto)
+        if "efectivo" in medio_pago.lower():
+            caja.efectivo = max(0.0, float(caja.efectivo) - monto)
+        else:
+            caja.digital = max(0.0, float(caja.digital) - monto)
+
+        caja.saldo_teorico = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
         self.caja_dao.update_caja(caja)
 
         self.caja_dao.add_movimiento(
             tipo="Reversión",
             monto=-monto,
-            detalle=f"Anulación de Boleta {boleta} mediante {nc_num}"
+            detalle=f"Anulación de Boleta {boleta} mediante {nc_num} ({motivo})"
         )
+
+        caja_dict = caja.to_dict()
+        caja_dict["total_teorico"] = caja.saldo_teorico
 
         return {
             "success": True,
-            "message": f"Anulación autorizada. Se emitió la Nota de Crédito {nc_num} y se reversó el importe en caja.",
-            "anulacion": anulacion
+            "message": f"Anulación autorizada por Gerencia. Se emitió la Nota de Crédito {nc_num} por S/ {monto:.2f} y se reversó el importe en caja.",
+            "anulacion": anulacion,
+            "caja": caja_dict
         }
 
 
@@ -228,6 +247,40 @@ class CajaService:
             "movimientos": self.caja_dao.get_movimientos()
         }
 
+    def aperturar_caja(self, apertura_data: dict) -> Dict[str, Any]:
+        """RF07: Apertura de turno de caja con fondo de sencillo."""
+        monto_inicial = float(apertura_data.get("saldo_inicial", apertura_data.get("monto", 150.0)))
+        turno = apertura_data.get("turno", "Turno Mañana")
+        responsable = apertura_data.get("responsable", "Personal de Mostrador")
+        observaciones = apertura_data.get("observaciones", "Apertura estándar")
+
+        caja = self.caja_dao.get_caja_actual()
+        caja.apertura = monto_inicial
+        caja.efectivo = 0.0
+        caja.digital = 0.0
+        caja.egresos = 0.0
+        caja.saldo_teorico = monto_inicial
+        caja.arqueo_fisico = None
+        caja.diferencia = None
+        caja.estado = "Abierta"
+        caja.turno = turno
+        caja.fecha = datetime.now().strftime("%Y-%m-%d")
+        self.caja_dao.update_caja(caja)
+
+        self.caja_dao.add_movimiento(
+            tipo="Apertura",
+            monto=monto_inicial,
+            detalle=f"Fondo de sencillo inicial ({turno}) por {responsable}. {observaciones}"
+        )
+
+        caja_dict = caja.to_dict()
+        caja_dict["total_teorico"] = caja.saldo_teorico
+        return {
+            "success": True,
+            "message": f"Turno {turno} aperturado exitosamente con fondo inicial de S/ {monto_inicial:.2f}.",
+            "caja": caja_dict
+        }
+
     def registrar_egreso(self, monto: float, motivo: str) -> Dict[str, Any]:
         """RF07: Salidas de dinero justificadas."""
         if monto <= 0:
@@ -243,21 +296,31 @@ class CajaService:
         caja_dict["total_teorico"] = caja.saldo_teorico
         return {"success": True, "message": f"Egreso de S/ {monto:.2f} registrado ({motivo}).", "caja": caja_dict}
 
-    def realizar_arqueo_y_cierre(self, conteo_fisico: float) -> Dict[str, Any]:
+    def realizar_arqueo_y_cierre(self, conteo_fisico: float, responsable: str = None) -> Dict[str, Any]:
         """RF08: Arqueo comparando efectivo físico vs sistema y emisión de Reporte Z."""
         caja = self.caja_dao.get_caja_actual()
-        saldo_sistema = caja.saldo_teorico
+        saldo_sistema = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
         diferencia = round(conteo_fisico - saldo_sistema, 2)
 
+        caja.saldo_teorico = saldo_sistema
         caja.arqueo_fisico = conteo_fisico
         caja.diferencia = diferencia
         caja.estado = "Cerrada"
         self.caja_dao.update_caja(caja)
 
+        self.caja_dao.add_movimiento(
+            tipo="Cierre",
+            monto=0.0,
+            detalle=f"Arqueo y Cierre ({caja.turno}). Físico: S/ {conteo_fisico:.2f}, Dif: S/ {diferencia:+.2f}"
+        )
+
         estado_conformidad = "Caja Cuadrada Conforme (100%)" if abs(diferencia) < 0.50 else f"Discrepancia detectada: S/ {diferencia:+.2f}"
 
         reporte_z = {
-            "fecha_cierre": datetime.now().isoformat(),
+            "numero_reporte": f"Z-2026-{datetime.now().strftime('%m%d%H%M')}",
+            "fecha_cierre": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "turno": caja.turno,
+            "responsable": responsable or "Personal de Caja",
             "fondo_apertura": caja.apertura,
             "total_efectivo": caja.efectivo,
             "total_digital": caja.digital,
@@ -269,10 +332,15 @@ class CajaService:
             "cumplimiento_objetivo_02": "Cumplido (≥ 98% exactitud)" if abs(diferencia) < 0.50 else "Alerta de auditoría"
         }
 
+        caja_dict = caja.to_dict()
+        caja_dict["saldo_teorico"] = saldo_sistema
+        caja_dict["total_teorico"] = saldo_sistema
+
         return {
             "success": True,
-            "message": "Arqueo de fin de turno concluido exitosamente.",
-            "reporte_z": reporte_z
+            "message": f"Arqueo de fin de turno concluido. {estado_conformidad}.",
+            "reporte_z": reporte_z,
+            "caja": caja_dict
         }
 
 

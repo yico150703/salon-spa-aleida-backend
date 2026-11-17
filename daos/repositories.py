@@ -306,6 +306,21 @@ class VentaDAO(BaseDAO):
             logger.error("Error en VentaDAO.save: %s", e)
             return venta
 
+    def update_estado_anulada(self, numero_boleta: str, nota_credito: str):
+        try:
+            conn = get_connection()
+            cur = get_cursor(conn)
+            ph = "%s" if is_postgres() else "?"
+            cur.execute(
+                f"UPDATE ventas SET estado = 'Anulada', nota_credito = {ph} WHERE numero_boleta = {ph};",
+                (nota_credito, numero_boleta)
+            )
+            if not is_postgres():
+                conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error("Error en VentaDAO.update_estado_anulada: %s", e)
+
     def save_anulacion(self, anulacion_data: dict) -> dict:
         try:
             conn = get_connection()
