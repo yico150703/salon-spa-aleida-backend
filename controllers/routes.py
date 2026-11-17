@@ -207,6 +207,41 @@ def get_catalogo():
     return jsonify([s.to_dict() for s in servicio_dao.find_all()])
 
 # CU08: Usuarios y Roles [RF11]
+@api_bp.route("/auth/login", methods=["POST"])
+def auth_login():
+    data = request.json or {}
+    usuario = data.get("usuario", "").strip()
+    password = data.get("password", "").strip()
+
+    # Si se envía credencial conocida o demo
+    users = usuario_dao.find_all()
+    matched = next((u for u in users if u.usuario.lower() == usuario.lower()), None)
+    if matched:
+        return jsonify({
+            "success": True,
+            "usuario": matched.to_dict(),
+            "token": f"jwt_mock_token_{matched.usuario}_2026",
+            "mensaje": f"Bienvenido/a {matched.nombre}"
+        }), 200
+    
+    # Credenciales demo por defecto
+    if usuario in ["cramos", "aleida_admin", "csanchez", "cajero"]:
+        nombres = {
+            "cramos": ("Camila Ramos", "Recepcionista"),
+            "aleida_admin": ("Aleida Mendoza", "Gerente General"),
+            "csanchez": ("Carmen Sánchez", "Terapeuta / Cosmiatra"),
+            "cajero": ("Marcos López", "Cajero POS")
+        }
+        nom, rol = nombres.get(usuario, (usuario, "Personal"))
+        return jsonify({
+            "success": True,
+            "usuario": {"usuario": usuario, "nombre": nom, "rol": rol},
+            "token": f"jwt_mock_token_{usuario}_2026",
+            "mensaje": f"Bienvenido/a {nom}"
+        }), 200
+
+    return jsonify({"success": False, "error": "Credenciales inválidas"}), 401
+
 @api_bp.route("/usuarios", methods=["GET"])
 def get_usuarios():
     return jsonify([u.to_dict() for u in usuario_dao.find_all()])
