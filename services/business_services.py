@@ -152,6 +152,7 @@ class VentaService:
             caja.efectivo += total_neto
         else:
             caja.digital += total_neto
+        caja.saldo_teorico = round(caja.apertura + caja.efectivo + caja.digital - caja.egresos, 2)
         self.caja_dao.update_caja(caja)
 
         self.caja_dao.add_movimiento(
@@ -160,10 +161,14 @@ class VentaService:
             detalle=f"Cobro Boleta {num_boleta} ({medio_pago})"
         )
 
+        caja_dict = caja.to_dict()
+        caja_dict["total_teorico"] = caja.saldo_teorico
+
         return {
             "success": True,
             "message": f"Boleta {num_boleta} emitida exitosamente por S/ {total_neto:.2f}.",
-            "venta": guardada.to_dict()
+            "venta": guardada.to_dict(),
+            "caja": caja_dict
         }
 
     def anular_venta(self, data: dict) -> Dict[str, Any]:
@@ -214,8 +219,12 @@ class CajaService:
 
     def obtener_estado_caja(self) -> Dict[str, Any]:
         caja = self.caja_dao.get_caja_actual()
+        caja_dict = caja.to_dict()
+        total = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
+        caja_dict["saldo_teorico"] = total
+        caja_dict["total_teorico"] = total
         return {
-            **caja.to_dict(),
+            **caja_dict,
             "movimientos": self.caja_dao.get_movimientos()
         }
 
@@ -226,10 +235,13 @@ class CajaService:
 
         caja = self.caja_dao.get_caja_actual()
         caja.egresos += monto
+        caja.saldo_teorico = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
         self.caja_dao.update_caja(caja)
 
         self.caja_dao.add_movimiento("Egreso", -monto, motivo)
-        return {"success": True, "message": f"Egreso de S/ {monto:.2f} registrado ({motivo}).", "caja": caja.to_dict()}
+        caja_dict = caja.to_dict()
+        caja_dict["total_teorico"] = caja.saldo_teorico
+        return {"success": True, "message": f"Egreso de S/ {monto:.2f} registrado ({motivo}).", "caja": caja_dict}
 
     def realizar_arqueo_y_cierre(self, conteo_fisico: float) -> Dict[str, Any]:
         """RF08: Arqueo comparando efectivo físico vs sistema y emisión de Reporte Z."""
