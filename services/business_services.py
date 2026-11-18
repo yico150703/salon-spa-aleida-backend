@@ -26,7 +26,8 @@ class CitaService:
         """RF02: Validar disponibilidad en tiempo real y agendar cita."""
         fecha = data.get("fecha", datetime.now().strftime("%Y-%m-%d"))
         hora = data.get("hora", "10:00 AM")
-        especialista = data.get("especialista", "Carmen Sánchez")
+        especialista_raw = data.get("especialista", "Carmen Sánchez")
+        especialista = especialista_raw.split("(")[0].strip()
         cliente_nombre = data.get("cliente", "Cliente")
         dni = data.get("dni", "Online")
         servicio = data.get("servicio", "Masaje Relajante Aleida")
@@ -37,8 +38,8 @@ class CitaService:
         if conflicto:
             return {
                 "success": False,
-                "error": f"Conflicto de horario: {especialista} ya tiene agendada a {conflicto.cliente} a las {hora}.",
-                "sugerencia": "Por favor seleccione otro terapeuta o un bloque horario libre."
+                "error": f"Conflicto de horario: {especialista} ya tiene agendada una cita con {conflicto.cliente} a las {hora}.",
+                "sugerencia": "Por favor seleccione otro especialista o un bloque horario libre."
             }
 
         # RF01: Registrar o actualizar cliente automáticamente

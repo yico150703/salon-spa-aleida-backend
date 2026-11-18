@@ -1,13 +1,26 @@
 """
 =============================================================================
-CAPA 1: CONTROLADORES (CONTROLLER LAYER - REST API)
-Mapea las peticiones HTTP hacia los Servicios de Negocio correspondientes
-Conforme al Patrón MVC y Sección 3.8.1 del Documento de Arquitectura
+SALON SPA ALEIDA - CAPA DE CONTROLADORES REST API
+ÁREA DELIMITADA: Área de Recepción y Atención al Cliente
+Mapeo Oficial 1-a-1 con los 10 Casos de Uso del Sistema (CUS):
+  - CUS01: Autenticar Usuario
+  - CUS02: Registrar Personal
+  - CUS03: Registrar Cliente
+  - CUS04: Agendar Cita
+  - CUS05: Reprogramar Cita
+  - CUS06: Consultar Catálogo de Servicios y Productos
+  - CUS07: Aperturar Turno de Caja
+  - CUS08: Procesar Venta y Cobro
+  - CUS09: Anular Venta con Nota de Crédito
+  - CUS10: Arqueo y Cierre de Caja
+Patrón Arquitectónico: MVC + Composite DAO (4 Capas)
 =============================================================================
 """
 
+from datetime import datetime
 from flask import Blueprint, jsonify, request
 from database import is_postgres, get_connection
+from models.entities import Cliente, Usuario, Servicio, Producto, Compra
 from daos.repositories import (
     ClienteDAO, CitaDAO, VentaDAO, CajaDAO,
     ProductoDAO, CompraDAO, ServicioDAO, UsuarioDAO
@@ -18,7 +31,7 @@ from services.business_services import (
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
-# Inyección de dependencias (DAOs -> Servicios)
+# Inyección de dependencias (DAOs -> Servicios de Negocio)
 cliente_dao = ClienteDAO()
 cita_dao = CitaDAO()
 venta_dao = VentaDAO()
@@ -33,15 +46,19 @@ venta_service = VentaService(venta_dao, cita_dao, caja_dao)
 caja_service = CajaService(caja_dao)
 reporte_service = ReporteService(cita_dao, venta_dao, caja_dao)
 
+# =============================================================================
+# MONITOREO Y SALUD DEL SERVICIO (ÁREA DE RECEPCIÓN)
+# =============================================================================
 @api_bp.route("/health", methods=["GET"])
 def health():
     return jsonify({
         "status": "Online",
+        "area": "Área de Recepción y Atención al Cliente",
         "motor_bd": "PostgreSQL (Render)" if is_postgres() else "SQLite (Local Fallback)",
-        "arquitectura": "4 Capas (Presentación -> Control/Negocio -> Acceso a Datos DAO -> Base de Datos PostgreSQL)",
-        "patron": "MVC + DAO Composite",
-        "casos_de_uso": 9,
-        "requerimientos_funcionales": 12,
+        "arquitectura": "4 Capas (Presentación -> Control/Negocio -> Acceso a Datos DAO -> Base de Datos)",
+        "patron": "MVC + Composite DAO",
+        "casos_de_uso_negocio": 4,
+        "casos_de_uso_sistema": 10,
         "objetivos_smart": 4
     })
 
@@ -54,6 +71,7 @@ def db_status():
         return jsonify({
             "status": "Connected",
             "motor": engine,
+            "area": "Área de Recepción y Atención al Cliente",
             "clientes_count": len(cliente_dao.find_all()),
             "citas_count": len(cita_dao.find_all()),
             "ventas_count": len(venta_dao.find_all()),
@@ -66,64 +84,106 @@ def db_status():
             "error": str(e)
         }), 500
 
-# INSPECTOR DIDÁCTICO DE ARQUITECTURA
 @api_bp.route("/arquitectura/trace", methods=["GET"])
 def architecture_trace():
-    """Devuelve la explicación didáctica en tiempo real de cómo viaja la petición por las 4 capas."""
+    """Devuelve la explicación didáctica en tiempo real del flujo de recepción por las 4 capas."""
     accion = request.args.get("accion", "agendar_cita")
     traces = {
         "agendar_cita": {
-            "caso_de_uso": "CU01: Gestionar Citas y Agenda [RF02]",
-            "capa_1_presentacion": "React Portal / Formulario de Reserva con selector de terapeuta y fecha",
+            "caso_de_uso": "CUS04: Agendar Cita (Área de Recepción)",
+            "capa_1_presentacion": "React Portal / Formulario de Reserva con selector de terapeuta, cabina y fecha",
             "capa_2_controlador": "Flask Controller: POST /api/citas -> cita_service.agendar_cita()",
-            "capa_2_regla_negocio": "Validación de no-colisión de horario para el estilista + creación de cliente (RF01)",
+            "capa_2_regla_negocio": "Validación de no-colisión de horario de cabina/terapeuta + registro/actualización de cliente (CUS03)",
             "capa_3_dao": "CitaDAO.save(Cita) y ClienteDAO.save(Cliente)",
             "capa_4_entidad": "Entidades 'Cita' y 'Cliente' almacenadas en base de datos"
         },
         "cobrar_venta": {
-            "caso_de_uso": "CU03: Registrar Venta y Cobro [RF04, RF05]",
-            "capa_1_presentacion": "React POS Terminal / Selector de medio de pago y botón 'Cobrar'",
+            "caso_de_uso": "CUS08: Procesar Venta y Cobro (Área de Recepción)",
+            "capa_1_presentacion": "Terminal POS / Selección de medio de pago (Efectivo/POS/Yape/Plin) y botón 'Cobrar'",
             "capa_2_controlador": "Flask Controller: POST /api/ventas -> venta_service.procesar_venta()",
-            "capa_2_regla_negocio": "Cálculo de IGV (18%), correlativo B001, cita a Atendida e ingreso a Caja",
+            "capa_2_regla_negocio": "Cálculo matemático de Subtotal e IGV (18%), correlativo B001, cita a Atendida e ingreso a caja de turno",
             "capa_3_dao": "VentaDAO.save(Venta) y CajaDAO.add_movimiento()",
-            "capa_4_entidad": "Entidades 'Venta' y 'Caja' sincronizadas"
+            "capa_4_entidad": "Entidades 'Venta' y 'Caja' sincronizadas en BD"
         },
         "arqueo_caja": {
-            "caso_de_uso": "CU05: Gestionar Operaciones de Caja [RF08]",
-            "capa_1_presentacion": "React Calculadora de Arqueo / Conteo físico de billetes y monedas",
+            "caso_de_uso": "CUS10: Arqueo y Cierre de Caja (Área de Recepción)",
+            "capa_1_presentacion": "Calculadora de Arqueo / Conteo físico de efectivo y verificación de transacciones digitales",
             "capa_2_controlador": "Flask Controller: POST /api/caja/cierre -> caja_service.realizar_arqueo_y_cierre()",
-            "capa_2_regla_negocio": "Conciliación física vs saldo teórico, cálculo de discrepancia y emisión de Reporte Z",
+            "capa_2_regla_negocio": "Conciliación física vs saldo teórico, cálculo de discrepancia (ON-01: Disminuir descuadre al 0%) y emisión de Reporte Z",
             "capa_3_dao": "CajaDAO.update_caja() y CajaDAO.get_movimientos()",
-            "capa_4_entidad": "Entidad 'Caja' con estado 'Cerrada'"
+            "capa_4_entidad": "Entidad 'Caja' con estado 'Cerrada' y registro de auditoría"
         }
     }
     return jsonify(traces.get(accion, traces["agendar_cita"]))
 
-# CU01: Citas y Agenda [RF02, RF03]
-@api_bp.route("/citas", methods=["GET"])
-def get_citas():
-    return jsonify(cita_service.listar_citas())
-
-@api_bp.route("/citas", methods=["POST"])
-def post_cita():
+# =============================================================================
+# CUS01: AUTENTICAR USUARIO
+# Actor: Recepcionista / Cajero / Administrador
+# =============================================================================
+@api_bp.route("/auth/login", methods=["POST"])
+def auth_login():
     data = request.json or {}
-    res = cita_service.agendar_cita(data)
-    status_code = 201 if res.get("success") else 400
-    return jsonify(res), status_code
+    usuario = data.get("usuario", "").strip()
+    password = data.get("password", "").strip()
 
-@api_bp.route("/citas/<int:cita_id>/reprogramar", methods=["PUT"])
-def reprogram_cita(cita_id):
+    users = usuario_dao.find_all()
+    matched = next((u for u in users if u.usuario.lower() == usuario.lower()), None)
+    if matched:
+        return jsonify({
+            "success": True,
+            "usuario": matched.to_dict(),
+            "token": f"jwt_spa_{matched.usuario}_2026",
+            "mensaje": f"Bienvenido/a {matched.nombre}"
+        }), 200
+
+    # Credenciales estándar para demostración de recepción
+    if usuario in ["cramos", "recepcion", "csanchez", "cajero", "aleida_admin", "admin"]:
+        nombres = {
+            "cramos": ("Camila Ramos", "Recepcionista", "Turno Mañana"),
+            "recepcion": ("Camila Ramos", "Recepcionista", "Turno Mañana"),
+            "csanchez": ("Carmen Sánchez", "Cajero", "Turno Mañana"),
+            "cajero": ("Marcos López", "Cajero", "Turno Mañana"),
+            "aleida_admin": ("Aleida Mendoza", "Administrador", "Turno Completo"),
+            "admin": ("Aleida Mendoza", "Administrador", "Turno Completo")
+        }
+        nom, rol, turno = nombres.get(usuario, (usuario, "Recepcionista", "Turno Mañana"))
+        return jsonify({
+            "success": True,
+            "usuario": {"usuario": usuario, "nombre": nom, "rol": rol, "turno": turno},
+            "token": f"jwt_spa_{usuario}_2026",
+            "mensaje": f"Bienvenido/a {nom} - {rol}"
+        }), 200
+
+    return jsonify({"success": False, "error": "Credenciales inválidas"}), 401
+
+@api_bp.route("/usuarios", methods=["GET"])
+def get_usuarios():
+    return jsonify([u.to_dict() for u in usuario_dao.find_all()])
+
+# =============================================================================
+# CUS02: REGISTRAR PERSONAL (RECEPCIÓN & ESPECIALISTAS)
+# Actor: Administrador / Recepcionista
+# =============================================================================
+@api_bp.route("/personal", methods=["GET"])
+def get_personal():
+    return jsonify([u.to_dict() for u in usuario_dao.find_all()])
+
+@api_bp.route("/personal", methods=["POST"])
+def post_personal():
     data = request.json or {}
-    res = cita_service.reprogramar_cita(cita_id, data.get("nueva_fecha"), data.get("nueva_hora"))
-    return jsonify(res), (200 if res.get("success") else 400)
+    nuevo = Usuario(
+        usuario=data.get("usuario", f"user_{int(datetime.now().timestamp())}"),
+        nombre=data.get("nombre", ""),
+        rol=data.get("rol", "Recepcionista"),
+        turno=data.get("turno", "Turno Mañana")
+    )
+    guardado = usuario_dao.save(nuevo)
+    return jsonify({"success": True, "personal": guardado.to_dict()}), 201
 
-@api_bp.route("/citas/<int:cita_id>/estado", methods=["PUT"])
-def change_cita_estado(cita_id):
-    data = request.json or {}
-    res = cita_service.cambiar_estado(cita_id, data.get("estado"), data.get("motivo"))
-    return jsonify(res), (200 if res.get("success") else 400)
-
-# CU02: Gestión de Clientes [RF01]
+# =============================================================================
+# CUS03: REGISTRAR CLIENTE
+# Actor: Recepcionista
+# =============================================================================
 @api_bp.route("/clientes", methods=["GET"])
 def get_clientes():
     return jsonify([c.to_dict() for c in cliente_dao.find_all()])
@@ -140,29 +200,79 @@ def post_cliente():
     guardado = cliente_dao.save(nuevo)
     return jsonify({"success": True, "cliente": guardado.to_dict()}), 201
 
-# CU03: Ventas y Cobro [RF04, RF05]
-@api_bp.route("/ventas", methods=["GET"])
-def get_ventas():
-    return jsonify(venta_service.listar_ventas())
+@api_bp.route("/clientes/<dni>", methods=["GET"])
+def get_cliente_by_dni(dni):
+    cliente = cliente_dao.find_by_dni(dni)
+    if cliente:
+        return jsonify(cliente.to_dict()), 200
+    return jsonify({"error": "Cliente no encontrado"}), 404
 
-@api_bp.route("/ventas", methods=["POST"])
-def post_venta():
+# =============================================================================
+# CUS04: AGENDAR CITA
+# Actor: Recepcionista
+# =============================================================================
+@api_bp.route("/citas", methods=["GET"])
+def get_citas():
+    return jsonify(cita_service.listar_citas())
+
+@api_bp.route("/citas", methods=["POST"])
+def post_cita():
     data = request.json or {}
-    res = venta_service.procesar_venta(data)
-    return jsonify(res), (201 if res.get("success") else 400)
+    res = cita_service.agendar_cita(data)
+    status_code = 201 if res.get("success") else 400
+    return jsonify(res), status_code
 
-# CU04: Anulación de Venta [RF06]
-@api_bp.route("/anulaciones", methods=["GET"])
-def get_anulaciones():
-    return jsonify(venta_dao.get_anulaciones())
-
-@api_bp.route("/anulaciones", methods=["POST"])
-def post_anulacion():
+# =============================================================================
+# CUS05: REPROGRAMAR CITA
+# Actor: Recepcionista
+# =============================================================================
+@api_bp.route("/citas/<int:cita_id>/reprogramar", methods=["PUT"])
+def reprogram_cita(cita_id):
     data = request.json or {}
-    res = venta_service.anular_venta(data)
-    return jsonify(res), (201 if res.get("success") else 400)
+    res = cita_service.reprogramar_cita(cita_id, data.get("nueva_fecha"), data.get("nueva_hora"))
+    return jsonify(res), (200 if res.get("success") else 400)
 
-# CU05: Operaciones de Caja [RF07, RF08]
+@api_bp.route("/citas/<int:cita_id>/estado", methods=["PUT"])
+def change_cita_estado(cita_id):
+    data = request.json or {}
+    res = cita_service.cambiar_estado(cita_id, data.get("estado"), data.get("motivo"))
+    return jsonify(res), (200 if res.get("success") else 400)
+
+# =============================================================================
+# CUS06: CONSULTAR CATÁLOGO DE SERVICIOS Y PRODUCTOS
+# Actor: Recepcionista / Cajero
+# =============================================================================
+@api_bp.route("/catalogo", methods=["GET"])
+def get_catalogo():
+    return jsonify([s.to_dict() for s in servicio_dao.find_all()])
+
+@api_bp.route("/servicios", methods=["GET"])
+def get_servicios():
+    return jsonify([s.to_dict() for s in servicio_dao.find_all()])
+
+@api_bp.route("/productos", methods=["GET"])
+def get_productos():
+    return jsonify([p.to_dict() for p in producto_dao.find_all()])
+
+@api_bp.route("/servicios", methods=["POST"])
+def post_servicio():
+    data = request.json or {}
+    nuevo = Servicio(
+        id=0,
+        nombre=data.get("nombre", ""),
+        categoria=data.get("categoria", "Spa & Bienestar"),
+        duracion=int(data.get("duracion", 60)),
+        precio=float(data.get("precio", 0.0)),
+        comision=int(data.get("comision", 20)),
+        activo=True
+    )
+    guardado = servicio_dao.save(nuevo)
+    return jsonify({"success": True, "servicio": guardado.to_dict()}), 201
+
+# =============================================================================
+# CUS07: APERTURAR TURNO DE CAJA
+# Actor: Recepcionista / Cajero
+# =============================================================================
 @api_bp.route("/caja", methods=["GET"])
 def get_caja():
     return jsonify(caja_service.obtener_estado_caja())
@@ -173,87 +283,59 @@ def post_apertura():
     res = caja_service.aperturar_caja(data)
     return jsonify(res), (200 if res.get("success") else 400)
 
+# =============================================================================
+# CUS08: PROCESAR VENTA Y COBRO
+# Actor: Recepcionista / Cajero
+# =============================================================================
+@api_bp.route("/ventas", methods=["GET"])
+def get_ventas():
+    return jsonify(venta_service.listar_ventas())
+
+@api_bp.route("/ventas", methods=["POST"])
+def post_venta():
+    data = request.json or {}
+    res = venta_service.procesar_venta(data)
+    return jsonify(res), (201 if res.get("success") else 400)
+
+# =============================================================================
+# CUS09: ANULAR VENTA CON NOTA DE CRÉDITO
+# Actor: Recepcionista / Cajero (Validación)
+# =============================================================================
+@api_bp.route("/anulaciones", methods=["GET"])
+def get_anulaciones():
+    return jsonify(venta_dao.get_anulaciones())
+
+@api_bp.route("/anulaciones", methods=["POST"])
+def post_anulacion():
+    data = request.json or {}
+    res = venta_service.anular_venta(data)
+    return jsonify(res), (201 if res.get("success") else 400)
+
+# =============================================================================
+# CUS10: ARQUEO Y CIERRE DE CAJA
+# Actor: Recepcionista / Cajero
+# =============================================================================
 @api_bp.route("/caja/egreso", methods=["POST"])
 def post_egreso():
     data = request.json or {}
-    res = caja_service.registrar_egreso(float(data.get("monto", 0.0)), data.get("motivo", "Egreso menor"))
+    res = caja_service.registrar_egreso(float(data.get("monto", 0.0)), data.get("motivo", "Egreso menor de mostrador"))
     return jsonify(res), (200 if res.get("success") else 400)
 
 @api_bp.route("/caja/cierre", methods=["POST"])
 def post_cierre():
     data = request.json or {}
     conteo_fisico = float(data.get("conteo_fisico", 0.0))
-    responsable = data.get("responsable", "Personal de Caja")
+    responsable = data.get("responsable", "Personal de Recepción / Caja")
     res = caja_service.realizar_arqueo_y_cierre(conteo_fisico, responsable)
     return jsonify(res), 200
 
-# CU06: Compras e Insumos [RF09]
+# =============================================================================
+# RUTAS DE COMPATIBILIDAD AUXILIAR (Compras / Métricas)
+# =============================================================================
 @api_bp.route("/compras", methods=["GET"])
 def get_compras():
     return jsonify([p.to_dict() for p in producto_dao.find_all()])
 
-@api_bp.route("/compras/orden", methods=["POST"])
-def post_orden_compra():
-    data = request.json or {}
-    nueva_oc = Compra(
-        id=0,
-        numero_oc=f"OC-2026-{len(compra_dao.find_all()) + 89:03d}",
-        fecha=datetime.now().strftime("%Y-%m-%d"),
-        proveedor=data.get("proveedor", "L'Oréal Professionnel"),
-        insumo=data.get("insumo", "Tinte Capilar"),
-        cantidad=int(data.get("cantidad", 12)),
-        monto_total=float(data.get("monto_total", 336.0)),
-        estado="Enviada / En Tránsito"
-    )
-    guardada = compra_dao.save(nueva_oc)
-    return jsonify({"success": True, "orden": guardada.to_dict()}), 201
-
-# CU07: Catálogo de Servicios [RF10]
-@api_bp.route("/catalogo", methods=["GET"])
-def get_catalogo():
-    return jsonify([s.to_dict() for s in servicio_dao.find_all()])
-
-# CU08: Usuarios y Roles [RF11]
-@api_bp.route("/auth/login", methods=["POST"])
-def auth_login():
-    data = request.json or {}
-    usuario = data.get("usuario", "").strip()
-    password = data.get("password", "").strip()
-
-    # Si se envía credencial conocida o demo
-    users = usuario_dao.find_all()
-    matched = next((u for u in users if u.usuario.lower() == usuario.lower()), None)
-    if matched:
-        return jsonify({
-            "success": True,
-            "usuario": matched.to_dict(),
-            "token": f"jwt_mock_token_{matched.usuario}_2026",
-            "mensaje": f"Bienvenido/a {matched.nombre}"
-        }), 200
-    
-    # Credenciales demo por defecto
-    if usuario in ["cramos", "aleida_admin", "csanchez", "cajero"]:
-        nombres = {
-            "cramos": ("Camila Ramos", "Recepcionista"),
-            "aleida_admin": ("Aleida Mendoza", "Gerente General"),
-            "csanchez": ("Carmen Sánchez", "Terapeuta / Cosmiatra"),
-            "cajero": ("Marcos López", "Cajero POS")
-        }
-        nom, rol = nombres.get(usuario, (usuario, "Personal"))
-        return jsonify({
-            "success": True,
-            "usuario": {"usuario": usuario, "nombre": nom, "rol": rol},
-            "token": f"jwt_mock_token_{usuario}_2026",
-            "mensaje": f"Bienvenido/a {nom}"
-        }), 200
-
-    return jsonify({"success": False, "error": "Credenciales inválidas"}), 401
-
-@api_bp.route("/usuarios", methods=["GET"])
-def get_usuarios():
-    return jsonify([u.to_dict() for u in usuario_dao.find_all()])
-
-# CU09: Reportes Gerenciales y Metas SMART [RF12]
 @api_bp.route("/reportes", methods=["GET"])
 def get_reportes():
     return jsonify(reporte_service.obtener_metricas_completas())

@@ -154,10 +154,16 @@ class CitaDAO(BaseDAO):
             conn = get_connection()
             cur = get_cursor(conn)
             ph = "%s" if is_postgres() else "?"
+            # Normalizar nombre: quitar sufijo entre paréntesis para comparar solo el nombre base
+            # Ej: "Carmen Sánchez (Cosmiatra Máster)" -> "Carmen Sánchez"
+            nombre_base = especialista.split("(")[0].strip()
+            like_op = "ILIKE" if is_postgres() else "LIKE"
             cur.execute(
                 f"SELECT id, hora, fecha, cliente, dni, servicio, especialista, estado, monto, cobrado, motivo_cancelacion "
-                f"FROM citas WHERE fecha = {ph} AND hora = {ph} AND especialista = {ph} AND estado NOT IN ('Cancelada', 'No Asistió');",
-                (fecha, hora, especialista)
+                f"FROM citas WHERE fecha = {ph} AND hora = {ph} "
+                f"AND (especialista {like_op} {ph} OR especialista {like_op} {ph}) "
+                f"AND estado NOT IN ('Cancelada', 'No Asistió', 'No Asistio', 'Anulada');",
+                (fecha, hora, nombre_base, f"{nombre_base}%")
             )
             r = cur.fetchone()
             conn.close()
