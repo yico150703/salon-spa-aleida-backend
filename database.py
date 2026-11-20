@@ -223,9 +223,35 @@ def init_db():
         nombre VARCHAR(100) NOT NULL,
         rol VARCHAR(50) NOT NULL,
         permisos TEXT NOT NULL,
-        activo BOOLEAN DEFAULT TRUE
+        activo BOOLEAN DEFAULT TRUE,
+        dni VARCHAR(15),
+        password_temporal VARCHAR(100),
+        telefono VARCHAR(25),
+        email VARCHAR(100)
     );
     """)
+
+    # Migración de columnas adicionales en usuarios si ya existía la tabla
+    try:
+        if postgres_mode:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS dni VARCHAR(15);")
+            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_temporal VARCHAR(100);")
+            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS telefono VARCHAR(25);")
+            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email VARCHAR(100);")
+        else:
+            cur.execute("PRAGMA table_info(usuarios);")
+            cols = [r["name"] if isinstance(r, dict) else r[1] for r in cur.fetchall()]
+            if "dni" not in cols:
+                cur.execute("ALTER TABLE usuarios ADD COLUMN dni VARCHAR(15);")
+            if "password_temporal" not in cols:
+                cur.execute("ALTER TABLE usuarios ADD COLUMN password_temporal VARCHAR(100);")
+            if "telefono" not in cols:
+                cur.execute("ALTER TABLE usuarios ADD COLUMN telefono VARCHAR(25);")
+            if "email" not in cols:
+                cur.execute("ALTER TABLE usuarios ADD COLUMN email VARCHAR(100);")
+            conn.commit()
+    except Exception as e:
+        logger.warning("Aviso durante migración de columnas en usuarios: %s", e)
 
     if not postgres_mode:
         conn.commit()
@@ -359,13 +385,21 @@ def seed_initial_data(conn, cur, postgres_mode):
     count = row['c'] if isinstance(row, dict) else row[0]
     if count == 0:
         usuarios = [
-            ("cramos", "Camila Ramos", "Recepcionista", "Agenda (CU01), Clientes (CU02), POS (CU03)"),
-            ("aleida_admin", "Aleida Mendoza", "Gerente General", "Acceso Total (CU01-CU09), Aprobación de Anulaciones (CU04)"),
-            ("csanchez", "Carmen Sánchez", "Terapeuta / Cosmiatra", "Consulta de Agenda propia, Historial de atenciones")
+            ("cramos", "Camila Ramos", "Recepcionista", "Agenda (CUS04), Clientes (CUS03), POS (CUS08)", "71234567", "SpaAleida2026!", "987654321", "cramos@spaaleida.pe"),
+            ("aleida_admin", "Aleida Mendoza", "Administrador", "Acceso Total al Sistema, Aprobación de Anulaciones", "40123456", "AdminAleida2026!", "999888777", "gerencia@spaaleida.pe"),
+            ("csanchez", "Carmen Sánchez", "Terapeuta", "Consulta de Agenda y Tratamientos en Cabina", "43218765", "SpaAleida2026!", "988776655", "csanchez@spaaleida.pe")
         ]
-        ph = "%s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?"
+        ph = "%s, %s, %s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?, ?, ?"
         for u in usuarios:
-            cur.execute(f"INSERT INTO usuarios (usuario, nombre, rol, permisos) VALUES ({ph})", u)
+            cur.execute(f"INSERT INTO usuarios (usuario, nombre, rol, permisos, dni, password_temporal, telefono, email) VALUES ({ph})", u)
+    else:
+        # Actualizar datos de DNI y contraseña temporal en usuarios semilla existentes si están vacíos
+        try:
+            cur.execute("UPDATE usuarios SET dni = '71234567', password_temporal = 'SpaAleida2026!', telefono = '987654321' WHERE usuario = 'cramos' AND (dni IS NULL OR dni = '');")
+            cur.execute("UPDATE usuarios SET dni = '40123456', password_temporal = 'AdminAleida2026!', telefono = '999888777' WHERE usuario = 'aleida_admin' AND (dni IS NULL OR dni = '');")
+            cur.execute("UPDATE usuarios SET dni = '43218765', password_temporal = 'SpaAleida2026!', telefono = '988776655' WHERE usuario = 'csanchez' AND (dni IS NULL OR dni = '');")
+        except Exception:
+            pass
 
     if not postgres_mode:
         conn.commit()

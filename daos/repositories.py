@@ -609,6 +609,29 @@ class ServicioDAO(BaseDAO):
             logger.error("Error en ServicioDAO.find_all: %s", e)
             return []
 
+    def find_by_nombre(self, nombre: str) -> Optional[Servicio]:
+        try:
+            conn = get_connection()
+            cur = get_cursor(conn)
+            ph = "%s" if is_postgres() else "?"
+            cur.execute(f"SELECT id, nombre, categoria, duracion, precio, comision, activo FROM servicios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM({ph})) AND activo = TRUE;", (nombre,))
+            r = cur.fetchone()
+            conn.close()
+            if r:
+                return Servicio(
+                    id=r["id"],
+                    nombre=r["nombre"],
+                    categoria=r["categoria"],
+                    duracion=r["duracion"],
+                    precio=float(r["precio"]),
+                    comision=r["comision"],
+                    activo=bool(r["activo"])
+                )
+            return None
+        except Exception as e:
+            logger.error("Error en ServicioDAO.find_by_nombre: %s", e)
+            return None
+
     def save(self, serv: Servicio) -> Servicio:
         try:
             conn = get_connection()
@@ -632,7 +655,7 @@ class ServicioDAO(BaseDAO):
             return serv
         except Exception as e:
             logger.error("Error en ServicioDAO.save: %s", e)
-            return serv
+            raise e
 
 
 class UsuarioDAO(BaseDAO):
@@ -640,7 +663,7 @@ class UsuarioDAO(BaseDAO):
         try:
             conn = get_connection()
             cur = get_cursor(conn)
-            cur.execute("SELECT usuario, nombre, rol, permisos, activo FROM usuarios WHERE activo = TRUE ORDER BY usuario ASC;")
+            cur.execute("SELECT usuario, nombre, rol, permisos, activo, dni, password_temporal, telefono, email FROM usuarios WHERE activo = TRUE ORDER BY usuario ASC;")
             rows = cur.fetchall()
             conn.close()
             return [
@@ -649,7 +672,11 @@ class UsuarioDAO(BaseDAO):
                     nombre=r["nombre"],
                     rol=r["rol"],
                     permisos=r["permisos"],
-                    activo=bool(r["activo"])
+                    activo=bool(r["activo"]),
+                    dni=r.get("dni") if isinstance(r, dict) else (r["dni"] if "dni" in r.keys() else None),
+                    password_temporal=r.get("password_temporal") if isinstance(r, dict) else (r["password_temporal"] if "password_temporal" in r.keys() else None),
+                    telefono=r.get("telefono") if isinstance(r, dict) else (r["telefono"] if "telefono" in r.keys() else None),
+                    email=r.get("email") if isinstance(r, dict) else (r["email"] if "email" in r.keys() else None)
                 )
                 for r in rows
             ]
@@ -657,14 +684,68 @@ class UsuarioDAO(BaseDAO):
             logger.error("Error en UsuarioDAO.find_all: %s", e)
             return []
 
+    def find_by_dni(self, dni: str) -> Optional[Usuario]:
+        if not dni:
+            return None
+        try:
+            conn = get_connection()
+            cur = get_cursor(conn)
+            ph = "%s" if is_postgres() else "?"
+            cur.execute(f"SELECT usuario, nombre, rol, permisos, activo, dni, password_temporal, telefono, email FROM usuarios WHERE dni = {ph} AND activo = TRUE;", (dni,))
+            r = cur.fetchone()
+            conn.close()
+            if r:
+                return Usuario(
+                    usuario=r["usuario"],
+                    nombre=r["nombre"],
+                    rol=r["rol"],
+                    permisos=r["permisos"],
+                    activo=bool(r["activo"]),
+                    dni=r["dni"],
+                    password_temporal=r.get("password_temporal") if isinstance(r, dict) else (r["password_temporal"] if "password_temporal" in r.keys() else None),
+                    telefono=r.get("telefono") if isinstance(r, dict) else (r["telefono"] if "telefono" in r.keys() else None),
+                    email=r.get("email") if isinstance(r, dict) else (r["email"] if "email" in r.keys() else None)
+                )
+            return None
+        except Exception as e:
+            logger.error("Error en UsuarioDAO.find_by_dni: %s", e)
+            return None
+
+    def find_by_usuario(self, usuario: str) -> Optional[Usuario]:
+        if not usuario:
+            return None
+        try:
+            conn = get_connection()
+            cur = get_cursor(conn)
+            ph = "%s" if is_postgres() else "?"
+            cur.execute(f"SELECT usuario, nombre, rol, permisos, activo, dni, password_temporal, telefono, email FROM usuarios WHERE LOWER(usuario) = LOWER({ph});", (usuario,))
+            r = cur.fetchone()
+            conn.close()
+            if r:
+                return Usuario(
+                    usuario=r["usuario"],
+                    nombre=r["nombre"],
+                    rol=r["rol"],
+                    permisos=r["permisos"],
+                    activo=bool(r["activo"]),
+                    dni=r.get("dni") if isinstance(r, dict) else (r["dni"] if "dni" in r.keys() else None),
+                    password_temporal=r.get("password_temporal") if isinstance(r, dict) else (r["password_temporal"] if "password_temporal" in r.keys() else None),
+                    telefono=r.get("telefono") if isinstance(r, dict) else (r["telefono"] if "telefono" in r.keys() else None),
+                    email=r.get("email") if isinstance(r, dict) else (r["email"] if "email" in r.keys() else None)
+                )
+            return None
+        except Exception as e:
+            logger.error("Error en UsuarioDAO.find_by_usuario: %s", e)
+            return None
+
     def save(self, user: Usuario) -> Usuario:
         try:
             conn = get_connection()
             cur = get_cursor(conn)
-            ph = self._ph(4)
+            ph = self._ph(9)
             cur.execute(
-                f"INSERT INTO usuarios (usuario, nombre, rol, permisos) VALUES ({ph});",
-                (user.usuario, user.nombre, user.rol, user.permisos)
+                f"INSERT INTO usuarios (usuario, nombre, rol, permisos, activo, dni, password_temporal, telefono, email) VALUES ({ph});",
+                (user.usuario, user.nombre, user.rol, user.permisos, user.activo, user.dni, user.password_temporal, user.telefono, user.email)
             )
             if not is_postgres():
                 conn.commit()
@@ -672,4 +753,4 @@ class UsuarioDAO(BaseDAO):
             return user
         except Exception as e:
             logger.error("Error en UsuarioDAO.save: %s", e)
-            return user
+            raise e

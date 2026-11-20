@@ -171,14 +171,87 @@ def get_personal():
 @api_bp.route("/personal", methods=["POST"])
 def post_personal():
     data = request.json or {}
-    nuevo = Usuario(
-        usuario=data.get("usuario", f"user_{int(datetime.now().timestamp())}"),
-        nombre=data.get("nombre", ""),
-        rol=data.get("rol", "Recepcionista"),
-        turno=data.get("turno", "Turno Mañana")
+    dni = str(data.get("dni", "")).strip()
+    nombre = str(data.get("nombre", "")).strip()
+    rol = str(data.get("rol", "Recepcionista")).strip()
+    telefono = str(data.get("telefono", "")).strip()
+    email = str(data.get("email", "")).strip()
+    usuario_input = str(data.get("usuario", "")).strip()
+
+    # 1. Validación de campos obligatorios
+    if not dni or not nombre or not rol:
+        return jsonify({
+            "success": False,
+            "error": "Notificar rechazo por datos incompletos: Ingrese DNI, nombre completo y rol asignado."
+        }), 400
+
+    if len(dni) < 8:
+        return jsonify({
+            "success": False,
+            "error": "Notificar rechazo: El DNI debe contener al menos 8 dígitos numéricos válidos."
+        }), 400
+
+    # 2. Verificar existencia / no duplicidad por DNI
+    existente_dni = usuario_dao.find_by_dni(dni)
+    if existente_dni:
+        return jsonify({
+            "success": False,
+            "error": f"Notificar rechazo por DNI duplicado: El personal con DNI {dni} ya se encuentra registrado en el sistema ({existente_dni.nombre})."
+        }), 409
+
+    # 3. Determinar o generar nombre de usuario único
+    usuario = usuario_input
+    if not usuario:
+        # Generar nombre de usuario canónico a partir del nombre y DNI
+        partes = nombre.lower().split()
+        usuario = f"{partes[0][0]}{partes[1] if len(partes) > 1 else 'user'}{dni[-2:]}"
+
+    existente_user = usuario_dao.find_by_usuario(usuario)
+    if existente_user:
+        usuario = f"{usuario}_{dni[-4:]}"
+
+    # 4. Generar credenciales de acceso temporales (según diagrama de secuencia CUS02)
+    password_temporal = data.get("password") or f"SpaAleida_{dni[-4:]}!"
+    
+    permisos_map = {
+        "Administrador": "Control total del sistema, seguridad y parámetros",
+        "Recepcionista": "Agenda de citas (CUS04), clientes (CUS03) y POS mostrador",
+        "Cajero": "Cobranzas (CUS08), arqueo de caja (CUS10) y comprobantes",
+        "Terapeuta": "Consulta de agenda de cabinas y atenciones de spa"
+    }
+    permisos = permisos_map.get(rol, f"Acceso asignado para rol {rol}")
+
+    nuevo_personal = Usuario(
+        usuario=usuario,
+        nombre=nombre,
+        rol=rol,
+        permisos=permisos,
+        activo=True,
+        dni=dni,
+        password_temporal=password_temporal,
+        telefono=telefono,
+        email=email
     )
-    guardado = usuario_dao.save(nuevo)
-    return jsonify({"success": True, "personal": guardado.to_dict()}), 201
+
+    try:
+        guardado = usuario_dao.save(nuevo_personal)
+        return jsonify({
+            "success": True,
+            "mensaje": "Confirmación de almacenamiento exitoso en base de datos",
+            "confirmacion": "Personal registrado con éxito",
+            "personal": guardado.to_dict(),
+            "credenciales_temporales": {
+                "usuario": guardado.usuario,
+                "password_temporal": password_temporal,
+                "rol": guardado.rol,
+                "permisos": guardado.permisos
+            }
+        }), 201
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Error al persistir personal en base de datos: {str(e)}"
+        }), 500
 
 # =============================================================================
 # CUS03: REGISTRAR CLIENTE
@@ -191,25 +264,53 @@ def get_clientes():
 @api_bp.route("/clientes", methods=["POST"])
 def post_cliente():
     data = request.json or {}
+    dni = str(data.get("dni", "")).strip()
+    nombre = str(data.get("nombre", "")).strip()
+    telefono = str(data.get("telefono", "")).strip()
+    preferencias = str(data.get("preferencias", "Ficha estética nueva")).strip()
+
+    if not dni or not nombre:
+        return jsonify({
+            "success": False,
+            "error": "Campos incompletos: El DNI y los Nombres y Apellidos son obligatorios."
+        }), 400
+
     nuevo = Cliente(
-        dni=str(data.get("dni", "")),
-        nombre=data.get("nombre", ""),
-        telefono=data.get("telefono", ""),
-        preferencias=data.get("preferencias", "Ficha estética nueva")
+        dni=dni,
+        nombre=nombre,
+        telefono=telefono,
+        preferencias=preferencias,
+        visitas=int(data.get("visitas", 1))
     )
     guardado = cliente_dao.save(nuevo)
-    return jsonify({"success": True, "cliente": guardado.to_dict()}), 201
+    return jsonify({
+        "success": True,
+        "mensaje": "Confirmación de almacenamiento exitoso en base de datos",
+        "confirmacion": "Cliente registrado con éxito",
+        "cliente": guardado.to_dict()
+    }), 201
 
 @api_bp.route("/clientes/<dni>", methods=["GET"])
 def get_cliente_by_dni(dni):
-    cliente = cliente_dao.find_by_dni(dni)
+    dni_clean = str(dni).strip()
+    cliente = cliente_dao.find_by_dni(dni_clean)
     if cliente:
-        return jsonify(cliente.to_dict()), 200
-    return jsonify({"error": "Cliente no encontrado"}), 404
+        return jsonify({
+            "success": True,
+            "existe": True,
+            "mensaje": "Retorno de datos de cliente existente",
+            "cliente": cliente.to_dict()
+        }), 200
+    return jsonify({
+        "success": False,
+        "existe": False,
+        "error": "Cliente no registrado en el padrón",
+        "dni": dni_clean
+    }), 404
 
 # =============================================================================
-# CUS04: AGENDAR CITA
-# Actor: Recepcionista
+# CUS04: GESTIONAR CITAS (ANTES AGENDAR CITA)
+# Actor: Recepcionista / Cliente Web
 # =============================================================================
 @api_bp.route("/citas", methods=["GET"])
 def get_citas():
@@ -223,7 +324,7 @@ def post_cita():
     return jsonify(res), status_code
 
 # =============================================================================
-# CUS05: REPROGRAMAR CITA
+# CUS05: REPROGRAMAR O CANCELAR CITA
 # Actor: Recepcionista
 # =============================================================================
 @api_bp.route("/citas/<int:cita_id>/reprogramar", methods=["PUT"])
@@ -239,8 +340,8 @@ def change_cita_estado(cita_id):
     return jsonify(res), (200 if res.get("success") else 400)
 
 # =============================================================================
-# CUS06: CONSULTAR CATÁLOGO DE SERVICIOS Y PRODUCTOS
-# Actor: Recepcionista / Cajero
+# CUS06: CONSULTAR Y REGISTRAR EN CATÁLOGO DE SERVICIOS
+# Actor: Administrador / Recepcionista / Cajero
 # =============================================================================
 @api_bp.route("/catalogo", methods=["GET"])
 def get_catalogo():
@@ -250,6 +351,21 @@ def get_catalogo():
 def get_servicios():
     return jsonify([s.to_dict() for s in servicio_dao.find_all()])
 
+@api_bp.route("/servicios/categorias", methods=["GET"])
+def get_categorias_servicios():
+    """Paso 3 y 4 de CUS06: Cargar y retornar categorías activas del spa."""
+    return jsonify({
+        "success": True,
+        "categorias": [
+            "Spa & Bienestar",
+            "Cosmiatría Facial",
+            "Cuidado Capilar",
+            "Manos & Pies",
+            "Masajes & Cromoterapia",
+            "Tratamientos Corporales"
+        ]
+    }), 200
+
 @api_bp.route("/productos", methods=["GET"])
 def get_productos():
     return jsonify([p.to_dict() for p in producto_dao.find_all()])
@@ -257,17 +373,56 @@ def get_productos():
 @api_bp.route("/servicios", methods=["POST"])
 def post_servicio():
     data = request.json or {}
+    nombre = str(data.get("nombre", "")).strip()
+    categoria = str(data.get("categoria", "Spa & Bienestar")).strip()
+    
+    try:
+        duracion = int(data.get("duracion", 0))
+    except (ValueError, TypeError):
+        duracion = 0
+
+    try:
+        precio = float(data.get("precio", 0.0))
+    except (ValueError, TypeError):
+        precio = 0.0
+
+    try:
+        comision = int(data.get("comision", 25))
+    except (ValueError, TypeError):
+        comision = 25
+
+    # Paso 8 de CUS06: Validar datos y tarifa positiva (> 0)
+    if not nombre or not categoria or precio <= 0 or duracion <= 0:
+        return jsonify({
+            "success": False,
+            "error": "Notificar error de validación de tarifa o duración: La tarifa (precio) y la duración deben ser valores positivos mayores a cero y los campos obligatorios deben estar completos."
+        }), 400
+
+    # Paso 9 de CUS06: Verificar no duplicidad de servicio en catálogo
+    existente = servicio_dao.find_by_nombre(nombre)
+    if existente:
+        return jsonify({
+            "success": False,
+            "error": f"Rechazo por duplicidad: Ya existe un servicio registrado con el nombre '{nombre}' en el catálogo del spa."
+        }), 409
+
+    # Pasos 10, 11 y 12: Guardar nuevo servicio, confirmar almacenamiento y notificar éxito
     nuevo = Servicio(
         id=0,
-        nombre=data.get("nombre", ""),
-        categoria=data.get("categoria", "Spa & Bienestar"),
-        duracion=int(data.get("duracion", 60)),
-        precio=float(data.get("precio", 0.0)),
-        comision=int(data.get("comision", 20)),
+        nombre=nombre,
+        categoria=categoria,
+        duracion=duracion,
+        precio=precio,
+        comision=comision,
         activo=True
     )
     guardado = servicio_dao.save(nuevo)
-    return jsonify({"success": True, "servicio": guardado.to_dict()}), 201
+    return jsonify({
+        "success": True,
+        "mensaje": "Confirmación de almacenamiento en catálogo",
+        "confirmacion": "Servicio registrado con éxito",
+        "servicio": guardado.to_dict()
+    }), 201
 
 # =============================================================================
 # CUS07: APERTURAR TURNO DE CAJA

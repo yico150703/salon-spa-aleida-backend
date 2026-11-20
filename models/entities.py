@@ -131,9 +131,13 @@ class Proveedor:
 class Usuario:
     usuario: str
     nombre: str
-    rol: str  # Recepcionista, Cajero, Estilista, Gerente General
+    rol: str  # Recepcionista, Cajero, Estilista, Gerente General, Administrador
     permisos: str
     activo: bool = True
+    dni: Optional[str] = None
+    password_temporal: Optional[str] = None
+    telefono: Optional[str] = None
+    email: Optional[str] = None
 
     def to_dict(self):
         return asdict(self)

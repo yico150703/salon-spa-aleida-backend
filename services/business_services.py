@@ -72,32 +72,50 @@ class CitaService:
         }
 
     def reprogramar_cita(self, cita_id: int, nueva_fecha: str, nueva_hora: str) -> Dict[str, Any]:
-        """RF03: Reprogramar cita validando disponibilidad."""
+        """CUS05: Reprogramar cita validando disponibilidad de cabina y especialista."""
         cita = self.cita_dao.find_by_id(cita_id)
         if not cita:
-            return {"success": False, "error": "Cita no encontrada"}
+            return {"success": False, "error": "Cita no encontrada en el sistema."}
 
         conflicto = self.cita_dao.find_conflict(nueva_fecha, nueva_hora, cita.especialista)
         if conflicto and conflicto.id != cita_id:
-            return {"success": False, "error": "El nuevo horario ya se encuentra ocupado."}
+            return {
+                "success": False,
+                "error": f"Horario no disponible: {cita.especialista} ya cuenta con una cita confirmada a las {nueva_hora} del {nueva_fecha}.",
+                "sugerencia": "Por favor seleccione otro turno horario u otra fecha disponible."
+            }
 
         cita.fecha = nueva_fecha
         cita.hora = nueva_hora
-        cita.estado = "Confirmada"
+        cita.estado = "Reprogramada"
         self.cita_dao.update(cita)
-        return {"success": True, "message": f"Cita reprogramada para {nueva_fecha} a las {nueva_hora}.", "cita": cita.to_dict()}
+        return {
+            "success": True,
+            "message": f"Cita reprogramada exitosamente para el {nueva_fecha} a las {nueva_hora}. Estado actualizado a 'Reprogramada'.",
+            "cita": cita.to_dict()
+        }
 
     def cambiar_estado(self, cita_id: int, nuevo_estado: str, motivo: str = None) -> Dict[str, Any]:
-        """RF03: Actualizar estado (Atendida, En Atención, Cancelada, No Asistió)."""
+        """CUS04 / CUS05: Actualizar estado (Atendida, Cancelada, etc.)."""
         cita = self.cita_dao.find_by_id(cita_id)
         if not cita:
-            return {"success": False, "error": "Cita no encontrada"}
+            return {"success": False, "error": "Cita no encontrada en el sistema."}
+
+        if nuevo_estado == "Cancelada" and not motivo:
+            return {"success": False, "error": "Debe especificar un motivo justificado para cancelar la cita."}
 
         cita.estado = nuevo_estado
         if motivo:
             cita.motivo_cancelacion = motivo
         self.cita_dao.update(cita)
-        return {"success": True, "message": f"Estado de cita actualizado a: {nuevo_estado}", "cita": cita.to_dict()}
+        
+        msg = f"Cita #{cita_id} actualizada a '{nuevo_estado}'."
+        if nuevo_estado == "Cancelada":
+            msg = f"Cita #{cita_id} cancelada exitosamente. Horario y cabina liberados de inmediato en la agenda."
+        elif nuevo_estado == "Atendida":
+            msg = f"Cita #{cita_id} marcada como 'Atendida'. Cabina liberada y lista para cobro en Caja."
+
+        return {"success": True, "message": msg, "cita": cita.to_dict()}
 
 
 class VentaService:
