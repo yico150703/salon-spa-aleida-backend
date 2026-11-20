@@ -29,7 +29,8 @@ class CitaService:
         especialista_raw = data.get("especialista", "Carmen Sánchez")
         especialista = especialista_raw.split("(")[0].strip()
         cliente_nombre = data.get("cliente", "Cliente")
-        dni = data.get("dni", "Online")
+        dni_raw = str(data.get("dni", "")).strip()
+        dni = dni_raw if (dni_raw and dni_raw.lower() != "mostrador") else "70000001"
         servicio = data.get("servicio", "Masaje Relajante Aleida")
         monto = float(data.get("monto", 250.0))
 
