@@ -126,35 +126,64 @@ def auth_login():
     usuario = data.get("usuario", "").strip()
     password = data.get("password", "").strip()
 
+    if not usuario:
+        return jsonify({"success": False, "error": "Ingrese el nombre de usuario."}), 400
+
+    # Normalizar alias de usuarios estándar
+    alias_map = {
+        "aleida_admin": "admin",
+        "cramos": "recepcion",
+        "marcos": "cajero"
+    }
+    usuario_buscar = alias_map.get(usuario.lower(), usuario.lower())
+
     users = usuario_dao.find_all()
-    matched = next((u for u in users if u.usuario.lower() == usuario.lower()), None)
+    matched = next((u for u in users if u.usuario.lower() == usuario_buscar or u.usuario.lower() == usuario.lower()), None)
+
     if matched:
-        return jsonify({
-            "success": True,
-            "usuario": matched.to_dict(),
-            "token": f"jwt_spa_{matched.usuario}_2026",
-            "mensaje": f"Bienvenido/a {matched.nombre}"
-        }), 200
+        # Validar contraseña temporal o contraseñas maestras del sistema
+        valid_pwd = (
+            (matched.password_temporal and matched.password_temporal == password) or
+            password in ["1234", "123", "SpaAleida2026!", "AdminAleida2026!"]
+        )
+        if valid_pwd:
+            return jsonify({
+                "success": True,
+                "usuario": matched.to_dict(),
+                "token": f"jwt_spa_{matched.usuario}_2026",
+                "mensaje": f"Bienvenido/a {matched.nombre}"
+            }), 200
+        else:
+            return jsonify({"success": False, "error": "Contraseña incorrecta. Verifique sus credenciales."}), 401
 
-    # Credenciales estándar para demostración de recepción
-    if usuario in ["cramos", "recepcion", "csanchez", "cajero", "aleida_admin", "admin"]:
-        nombres = {
-            "cramos": ("Camila Ramos", "Recepcionista", "Turno Mañana"),
-            "recepcion": ("Camila Ramos", "Recepcionista", "Turno Mañana"),
-            "csanchez": ("Carmen Sánchez", "Cajero", "Turno Mañana"),
-            "cajero": ("Marcos López", "Cajero", "Turno Mañana"),
-            "aleida_admin": ("Aleida Mendoza", "Administrador", "Turno Completo"),
-            "admin": ("Aleida Mendoza", "Administrador", "Turno Completo")
+    # Fallback si por alguna razón la BD estuviera vacía o en modo offline
+    if usuario.lower() in ["admin", "recepcion", "cajero", "aleida_admin", "cramos"]:
+        cuentas = {
+            "admin": ("Aleida Mendoza", "Administrador", "40123456", "personal,catalogo,anulaciones,operaciones-caja"),
+            "aleida_admin": ("Aleida Mendoza", "Administrador", "40123456", "personal,catalogo,anulaciones,operaciones-caja"),
+            "recepcion": ("Camila Ramos", "Recepcionista", "71234567", "agenda,clientes,reprogramar"),
+            "cramos": ("Camila Ramos", "Recepcionista", "71234567", "agenda,clientes,reprogramar"),
+            "cajero": ("Javier Torres", "Cajero", "72345678", "apertura,caja,anulaciones,operaciones-caja")
         }
-        nom, rol, turno = nombres.get(usuario, (usuario, "Recepcionista", "Turno Mañana"))
-        return jsonify({
-            "success": True,
-            "usuario": {"usuario": usuario, "nombre": nom, "rol": rol, "turno": turno},
-            "token": f"jwt_spa_{usuario}_2026",
-            "mensaje": f"Bienvenido/a {nom} - {rol}"
-        }), 200
+        nom, rol, dni, perm = cuentas[usuario.lower()]
+        if password in ["1234", "123", "SpaAleida2026!", "AdminAleida2026!"]:
+            return jsonify({
+                "success": True,
+                "usuario": {
+                    "usuario": usuario.lower(),
+                    "nombre": nom,
+                    "rol": rol,
+                    "dni": dni,
+                    "permisos": perm,
+                    "activo": True
+                },
+                "token": f"jwt_spa_{usuario}_2026",
+                "mensaje": f"Bienvenido/a {nom} - {rol}"
+            }), 200
+        else:
+            return jsonify({"success": False, "error": "Contraseña incorrecta."}), 401
 
-    return jsonify({"success": False, "error": "Credenciales inválidas"}), 401
+    return jsonify({"success": False, "error": "Usuario no registrado en la base de datos."}), 401
 
 @api_bp.route("/usuarios", methods=["GET"])
 def get_usuarios():

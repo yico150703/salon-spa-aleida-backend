@@ -385,19 +385,17 @@ def seed_initial_data(conn, cur, postgres_mode):
     count = row['c'] if isinstance(row, dict) else row[0]
     if count == 0:
         usuarios = [
-            ("cramos", "Camila Ramos", "Recepcionista", "Agenda (CUS04), Clientes (CUS03), POS (CUS08)", "71234567", "SpaAleida2026!", "987654321", "cramos@spaaleida.pe"),
-            ("aleida_admin", "Aleida Mendoza", "Administrador", "Acceso Total al Sistema, Aprobación de Anulaciones", "40123456", "AdminAleida2026!", "999888777", "gerencia@spaaleida.pe"),
-            ("csanchez", "Carmen Sánchez", "Terapeuta", "Consulta de Agenda y Tratamientos en Cabina", "43218765", "SpaAleida2026!", "988776655", "csanchez@spaaleida.pe")
+            ("admin", "Aleida Mendoza", "Administrador", "personal,catalogo,anulaciones,operaciones-caja", "40123456", "1234", "999888777", "admin@spaaleida.pe"),
+            ("recepcion", "Camila Ramos", "Recepcionista", "agenda,clientes,reprogramar", "71234567", "1234", "987654321", "recepcion@spaaleida.pe"),
+            ("cajero", "Javier Torres", "Cajero", "apertura,caja,anulaciones,operaciones-caja", "72345678", "1234", "976543210", "cajero@spaaleida.pe")
         ]
         ph = "%s, %s, %s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?, ?, ?"
         for u in usuarios:
             cur.execute(f"INSERT INTO usuarios (usuario, nombre, rol, permisos, dni, password_temporal, telefono, email) VALUES ({ph})", u)
     else:
-        # Actualizar datos de DNI y contraseña temporal en usuarios semilla existentes si están vacíos
+        # Asegurar credenciales temporales en los 3 usuarios canónicos
         try:
-            cur.execute("UPDATE usuarios SET dni = '71234567', password_temporal = 'SpaAleida2026!', telefono = '987654321' WHERE usuario = 'cramos' AND (dni IS NULL OR dni = '');")
-            cur.execute("UPDATE usuarios SET dni = '40123456', password_temporal = 'AdminAleida2026!', telefono = '999888777' WHERE usuario = 'aleida_admin' AND (dni IS NULL OR dni = '');")
-            cur.execute("UPDATE usuarios SET dni = '43218765', password_temporal = 'SpaAleida2026!', telefono = '988776655' WHERE usuario = 'csanchez' AND (dni IS NULL OR dni = '');")
+            cur.execute("UPDATE usuarios SET password_temporal = '1234' WHERE usuario IN ('admin', 'recepcion', 'cajero') AND (password_temporal IS NULL OR password_temporal = '');")
         except Exception:
             pass
 
