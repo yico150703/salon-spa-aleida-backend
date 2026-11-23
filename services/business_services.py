@@ -591,51 +591,131 @@ class CajaService:
         caja_dict["total_teorico"] = caja.saldo_teorico
         return {"success": True, "message": f"Egreso de S/ {monto:.2f} registrado ({motivo}).", "caja": caja_dict}
 
-    def realizar_arqueo_y_cierre(self, conteo_fisico: float, responsable: str = None) -> Dict[str, Any]:
-        """RF08: Arqueo comparando efectivo físico vs sistema y emisión de Reporte Z."""
+    def consultar_saldo_teorico(self) -> Dict[str, Any]:
+        """
+        CUS10: Arqueo y Cierre de Caja
+        Pasos 2, 3, 4 y 5 del Diagrama de Secuencia Oficial BCE:
+        2: Consultar saldo teórico de la sesión de caja (:FormArqueo -> :CajaService)
+        3: Sumar movimientos de turno ingresos y egresos (:CajaService -> :CajaSesion)
+        4: Retornar saldo teórico acumulado (:CajaSesion -> :CajaService)
+        5: Presentar desglosador de billetes y monedas (:CajaService -> :FormArqueo)
+        """
         caja = self.caja_dao.get_caja_actual()
         saldo_sistema = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
-        diferencia = round(conteo_fisico - saldo_sistema, 2)
+        caja_dict = caja.to_dict()
+        caja_dict["saldo_teorico"] = saldo_sistema
+        caja_dict["total_teorico"] = saldo_sistema
 
+        denominaciones = [
+            {"valor": 200, "tipo": "billete", "label": "Billetes S/ 200"},
+            {"valor": 100, "tipo": "billete", "label": "Billetes S/ 100"},
+            {"valor": 50, "tipo": "billete", "label": "Billetes S/ 50"},
+            {"valor": 20, "tipo": "billete", "label": "Billetes S/ 20"},
+            {"valor": 10, "tipo": "billete", "label": "Billetes S/ 10"},
+            {"valor": 5, "tipo": "moneda", "label": "Monedas S/ 5"},
+            {"valor": 2, "tipo": "moneda", "label": "Monedas S/ 2"},
+            {"valor": 1, "tipo": "moneda", "label": "Monedas S/ 1"}
+        ]
+
+        return {
+            "success": True,
+            "paso": 4,
+            "saldo_teorico": saldo_sistema,
+            "saldo_teorico_acumulado": saldo_sistema,
+            "apertura": caja.apertura,
+            "efectivo": caja.efectivo,
+            "digital": caja.digital,
+            "egresos": caja.egresos,
+            "turno": caja.turno,
+            "cajero": caja.cajero,
+            "denominaciones": denominaciones,
+            "mensaje": f"Paso 4: Retornar saldo teórico acumulado (S/ {saldo_sistema:.2f}) y presentar desglosador."
+        }
+
+    def realizar_arqueo_y_cierre(self, conteo_fisico: float, responsable: str = None) -> Dict[str, Any]:
+        """
+        CUS10: Arqueo y Cierre de Caja (Diagrama de Secuencia BCE Oficial)
+        Actor: :Cajero
+        Boundary: :FormArqueo
+        Control: :CajaService
+        Entity: :CajaSesion
+
+        Paso 8: Calcular saldo teórico vs total físico contado (:FormArqueo -> :CajaService)
+        [Discrepancia = 0.00]:
+          9: Conciliar arqueo y cambiar estado de caja a 'Cerrada' (:CajaService -> :CajaSesion)
+          10: Confirmar cierre y conciliación de arqueo (:CajaSesion -> :CajaService)
+          11: Generar Reporte Z de auditoría final (:CajaService -> :FormArqueo)
+          12: Emitir Reporte Z de auditoría final y fin de turno (:FormArqueo -> :Cajero)
+        [Discrepancia != 0.00]:
+          13: Notificar discrepancia existente en caja (:CajaService -> :FormArqueo)
+          14: Reintentar digitar cantidades contadas en gaveta (:FormArqueo -> :Cajero)
+        """
+        caja = self.caja_dao.get_caja_actual()
+        saldo_sistema = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
+        diferencia = round(float(conteo_fisico) - saldo_sistema, 2)
+
+        # Rama [Discrepancia != 0.00]
+        if abs(diferencia) > 0.001:
+            return {
+                "success": False,
+                "paso": 13,
+                "discrepancia": diferencia,
+                "conteo_fisico": float(conteo_fisico),
+                "saldo_teorico": saldo_sistema,
+                "error": f"Paso 13: Notificar discrepancia existente en caja. Se detectó una diferencia de S/ {diferencia:+.2f} (Físico: S/ {conteo_fisico:.2f} vs Teórico: S/ {saldo_sistema:.2f}).",
+                "mensaje": f"Paso 13: Discrepancia detectada de S/ {diferencia:+.2f} en gaveta de caja.",
+                "alerta": "Paso 14: Reintentar digitar cantidades contadas en gaveta.",
+                "status_code": 409
+            }
+
+        # Rama [Discrepancia = 0.00]
+        # Paso 9: Conciliar arqueo y cambiar estado de caja a 'Cerrada' (:CajaService -> :CajaSesion)
         caja.saldo_teorico = saldo_sistema
-        caja.arqueo_fisico = conteo_fisico
-        caja.diferencia = diferencia
+        caja.arqueo_fisico = float(conteo_fisico)
+        caja.diferencia = 0.0
         caja.estado = "Cerrada"
         self.caja_dao.update_caja(caja)
 
+        # Paso 10: Confirmar cierre y conciliación de arqueo (:CajaSesion -> :CajaService)
         self.caja_dao.add_movimiento(
             tipo="Cierre",
             monto=0.0,
-            detalle=f"Arqueo y Cierre ({caja.turno}). Físico: S/ {conteo_fisico:.2f}, Dif: S/ {diferencia:+.2f}"
+            detalle=f"Arqueo y Cierre ({caja.turno}). Conciliación 100%: Físico S/ {conteo_fisico:.2f}, Dif S/ 0.00"
         )
 
-        estado_conformidad = "Caja Cuadrada Conforme (100%)" if abs(diferencia) < 0.50 else f"Discrepancia detectada: S/ {diferencia:+.2f}"
-
+        # Paso 11: Generar Reporte Z de auditoría final (:CajaService -> :FormArqueo)
         reporte_z = {
             "numero_reporte": f"Z-2026-{datetime.now().strftime('%m%d%H%M')}",
             "fecha_cierre": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "turno": caja.turno,
-            "responsable": responsable or "Personal de Caja",
+            "responsable": responsable or caja.cajero or "Personal de Caja",
             "fondo_apertura": caja.apertura,
             "total_efectivo": caja.efectivo,
             "total_digital": caja.digital,
             "total_egresos": caja.egresos,
             "saldo_teorico_sistema": saldo_sistema,
-            "conteo_fisico_arqueado": conteo_fisico,
-            "diferencia": diferencia,
-            "resultado": estado_conformidad,
-            "cumplimiento_objetivo_02": "Cumplido (≥ 98% exactitud)" if abs(diferencia) < 0.50 else "Alerta de auditoría"
+            "conteo_fisico_arqueado": float(conteo_fisico),
+            "diferencia": 0.0,
+            "resultado": "Arqueo Conciliado Conforme (Discrepancia S/ 0.00 - 100% Exactitud)",
+            "cumplimiento_objetivo_02": "Cumplido (100% exactitud contable)"
         }
 
         caja_dict = caja.to_dict()
         caja_dict["saldo_teorico"] = saldo_sistema
         caja_dict["total_teorico"] = saldo_sistema
+        caja_dict["estado"] = "Cerrada"
 
+        # Paso 12: Emitir Reporte Z de auditoría final y fin de turno (:FormArqueo -> :Cajero)
         return {
             "success": True,
-            "message": f"Arqueo de fin de turno concluido. {estado_conformidad}.",
+            "paso": 11,
+            "discrepancia": 0.0,
+            "message": f"Paso 11: Generar Reporte Z de auditoría final. Arqueo conciliado al 100% (Discrepancia S/ 0.00).",
+            "confirmacion": f"Paso 10: Confirmar cierre y conciliación de arqueo en base de datos. Turno {caja.turno} cerrado.",
+            "alerta": "Paso 12: Emitir Reporte Z de auditoría final y fin de turno.",
             "reporte_z": reporte_z,
-            "caja": caja_dict
+            "caja": caja_dict,
+            "status_code": 200
         }
 
 

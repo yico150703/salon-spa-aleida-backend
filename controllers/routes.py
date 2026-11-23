@@ -495,9 +495,15 @@ def post_anulacion():
     return jsonify(res), status_code
 
 # =============================================================================
-# CUS10: ARQUEO Y CIERRE DE CAJA
-# Actor: Recepcionista / Cajero
+# CUS10: ARQUEO Y CIERRE DE CAJA (Diagrama BCE Oficial)
+# Actor: Cajero / Recepcionista
 # =============================================================================
+@api_bp.route("/caja/saldo-teorico", methods=["GET"])
+def get_saldo_teorico():
+    """Pasos 2, 3, 4 y 5 del diagrama de secuencia CUS10."""
+    res = caja_service.consultar_saldo_teorico()
+    return jsonify(res), 200
+
 @api_bp.route("/caja/egreso", methods=["POST"])
 def post_egreso():
     data = request.json or {}
@@ -506,11 +512,13 @@ def post_egreso():
 
 @api_bp.route("/caja/cierre", methods=["POST"])
 def post_cierre():
+    """Pasos 8, 9, 10, 11, 12 (si Discrepancia = 0) o Pasos 13, 14 (si Discrepancia != 0)."""
     data = request.json or {}
     conteo_fisico = float(data.get("conteo_fisico", 0.0))
     responsable = data.get("responsable", "Personal de Recepción / Caja")
     res = caja_service.realizar_arqueo_y_cierre(conteo_fisico, responsable)
-    return jsonify(res), 200
+    status_code = res.get("status_code", 200 if res.get("success") else 409)
+    return jsonify(res), status_code
 
 # =============================================================================
 # RUTAS DE COMPATIBILIDAD AUXILIAR (Compras / Métricas)
