@@ -264,10 +264,14 @@ class VentaDAO(BaseDAO):
             cur.execute("""
                 SELECT v.numerocomprobante, v.tipocomprobante, v.serie, v.fechaemision, v.horaemision, 
                        v.dni_cliente, v.subtotal, v.igv, v.descuentototal, v.totalneto, v.estadocomprobante, v.notacredito,
-                       COALESCE(cl.nombres || ' ' || cl.apellidos, v.dni_cliente) as cliente_nombre
+                       COALESCE(cl.nombres || ' ' || cl.apellidos, v.dni_cliente, 'Cliente General') as cliente_nombre,
+                       COALESCE(d.descripcion, 'Tratamiento Spa Aleida') as servicio_nombre,
+                       COALESCE(p.mediopago, 'Efectivo') as mediopago
                 FROM "VentaComprobante" v 
                 LEFT JOIN "Cliente" cl ON v.dni_cliente = cl.dni 
-                ORDER BY v.fechaemision DESC;
+                LEFT JOIN "DetalleComprobante" d ON v.numerocomprobante = d.numerocomprobante AND d.item = 1
+                LEFT JOIN "Pago" p ON v.numerocomprobante = p.numerocomprobante
+                ORDER BY v.numerocomprobante DESC;
             """)
             rows = cur.fetchall()
             conn.close()
@@ -277,12 +281,12 @@ class VentaDAO(BaseDAO):
                     numero_boleta=r["numerocomprobante"],
                     fecha=f"{r['fechaemision']} {r['horaemision']}".strip(),
                     cliente=r["cliente_nombre"],
-                    servicio="Tratamiento Spa Aleida",
+                    servicio=r["servicio_nombre"],
                     subtotal=float(r["subtotal"] or 0.0),
                     igv=float(r["igv"] or 0.0),
                     descuento=float(r["descuentototal"] or 0.0),
                     total=float(r["totalneto"] or 0.0),
-                    medio_pago="Efectivo",
+                    medio_pago=r["mediopago"] or "Efectivo",
                     tipo_comprobante=r["tipocomprobante"] or "Boleta de Venta",
                     serie=r["serie"] or "B001",
                     dni_cliente=r["dni_cliente"] or "",
@@ -475,11 +479,13 @@ class VentaDAO(BaseDAO):
             conn = get_connection()
             cur = get_cursor(conn)
             cur.execute("""
-                SELECT numerocomprobante, fechaemision, COALESCE(notacredito, 'NC-001') as notacredito, 
-                       totalneto as monto, 'Devolución autorizada por gerencia' as motivo, 'Administrador' as autorizado_por 
-                FROM "VentaComprobante" 
-                WHERE estadocomprobante = 'Anulada' OR notacredito IS NOT NULL
-                ORDER BY fechaemision DESC;
+                SELECT v.numerocomprobante, v.fechaemision, COALESCE(v.notacredito, 'NC-001') as notacredito, 
+                       v.totalneto as monto, 'Devolución autorizada por gerencia' as motivo, 'Administrador' as autorizado_por,
+                       COALESCE(cl.nombres || ' ' || cl.apellidos, v.dni_cliente, 'Cliente General') as cliente_nombre
+                FROM "VentaComprobante" v
+                LEFT JOIN "Cliente" cl ON v.dni_cliente = cl.dni
+                WHERE v.estadocomprobante = 'Anulada' OR v.notacredito IS NOT NULL
+                ORDER BY v.fechaemision DESC;
             """)
             rows = cur.fetchall()
             conn.close()
@@ -491,7 +497,8 @@ class VentaDAO(BaseDAO):
                     "nota_credito": r["notacredito"],
                     "monto": float(r["monto"]),
                     "motivo": r["motivo"],
-                    "autorizado_por": r["autorizado_por"]
+                    "autorizado_por": r["autorizado_por"],
+                    "cliente": r["cliente_nombre"]
                 }
                 for r in rows
             ]

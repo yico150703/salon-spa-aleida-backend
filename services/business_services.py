@@ -246,7 +246,26 @@ class VentaService:
             }
 
         cliente = data.get("cliente", "Cliente General")
-        dni_cliente = data.get("dni", "72819382")
+        dni_cliente = data.get("dni")
+        if not dni_cliente and cita_id:
+            c = self.cita_dao.find_by_id(cita_id)
+            if c and c.dni:
+                dni_cliente = c.dni
+        if not dni_cliente and cliente:
+            try:
+                conn = get_connection()
+                cur = get_cursor(conn)
+                ph = "%s" if is_postgres() else "?"
+                cur.execute(f'SELECT dni FROM "Cliente" WHERE LOWER(TRIM(nombres || \' \' || apellidos)) = LOWER(TRIM({ph})) OR LOWER(TRIM(nombres)) = LOWER(TRIM({ph})) LIMIT 1;', (cliente, cliente))
+                cl_found = cur.fetchone()
+                conn.close()
+                if cl_found:
+                    dni_cliente = cl_found["dni"]
+            except Exception:
+                pass
+        if not dni_cliente:
+            dni_cliente = "72819382"
+
         servicio = data.get("servicio", "Servicio Spa")
         medio_pago = data.get("medio_pago", "Efectivo")
         cita_id = data.get("cita_id")
@@ -408,7 +427,7 @@ class VentaService:
         # Paso 3 y 4: Buscar venta y comprobante
         detalle_comp = self.venta_dao.obtener_detalle_comprobante(boleta) if boleta else None
         monto = float(data.get("monto", detalle_comp["total"] if detalle_comp else 280.0))
-        cliente = data.get("cliente", detalle_comp["cliente"] if detalle_comp else "Cliente General")
+        cliente = (detalle_comp.get("cliente") if detalle_comp else None) or data.get("cliente") or "Cliente General"
         medio_pago = data.get("medio_pago", detalle_comp["medio_pago"] if detalle_comp else "Efectivo")
         items = detalle_comp.get("items", []) if detalle_comp else []
 
