@@ -255,12 +255,9 @@ def init_db():
     );
     """)
 
-    # Vista sinónima "VentasComprobante"
+    # Eliminar cualquier tabla o vista residual para garantizar exactamente las 11 canónicas
     try:
-        if postgres_mode:
-            cur.execute('CREATE OR REPLACE VIEW "VentasComprobante" AS SELECT * FROM "VentaComprobante";')
-        else:
-            cur.execute('CREATE VIEW IF NOT EXISTS "VentasComprobante" AS SELECT * FROM "VentaComprobante";')
+        cur.execute('DROP VIEW IF EXISTS "VentasComprobante" CASCADE;')
     except Exception:
         pass
 
