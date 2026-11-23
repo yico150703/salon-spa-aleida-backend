@@ -285,26 +285,78 @@ class CajaService:
         self.caja_dao = caja_dao
 
     def obtener_estado_caja(self) -> Dict[str, Any]:
+        """
+        CUS Apertura Turno de Caja (Pasos 2, 3, 4, 13, 14):
+        2: Solicitar estado actual de la caja (:FormCaja -> :CajaService)
+        3: Consultar sesion de caja en base de datos (:CajaService -> :Caja)
+        [Caja NO Aperturada en el Turno]:
+        4: Retornar caja no aperturada en el turno (:Caja -> :CajaService)
+        [Caja Ya Aperturada en el Turno]:
+        13: Retornar turno activo con estado abierta (:Caja -> :CajaService)
+        14: Notificar sesion de caja ya iniciada (:CajaService -> :FormCaja)
+        """
         caja = self.caja_dao.get_caja_actual()
         caja_dict = caja.to_dict()
         total = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
         caja_dict["saldo_teorico"] = total
         caja_dict["total_teorico"] = total
-        return {
+
+        caja_abierta = (str(caja.estado).strip().lower() == "abierta")
+
+        res = {
             **caja_dict,
+            "caja_abierta": caja_abierta,
+            "estado": caja.estado,
+            "estadosesion": caja.estado,
             "movimientos": self.caja_dao.get_movimientos()
         }
 
+        if caja_abierta:
+            # Paso 13 y 14: Caja Ya Aperturada en el Turno
+            res["paso"] = 14
+            res["mensaje"] = f"Paso 14: Notificar sesión de caja ya iniciada ({caja.turno} con estado {caja.estado})."
+            res["alerta"] = "Paso 15: Mostrar caja activa y continuar con cobros."
+        else:
+            # Paso 4 y 5: Caja NO Aperturada en el Turno
+            res["paso"] = 4
+            res["mensaje"] = "Paso 4: Retornar caja no aperturada en el turno."
+            res["alerta"] = "Paso 5: Habilitar formulario de apertura."
+
+        return res
+
     def aperturar_caja(self, apertura_data: dict) -> Dict[str, Any]:
-        """RF07: Apertura de turno de caja con fondo de sencillo."""
-        monto_inicial = float(apertura_data.get("saldo_inicial", apertura_data.get("monto", 150.0)))
+        """
+        CUS Apertura Turno de Caja (Pasos 8, 9, 10, 11, 12):
+        8: Validar monto de fondo no negativo (:FormCaja -> :CajaService)
+        9: Registrar apertura de caja con estado abierta (:CajaService -> :Caja)
+        10: Confirmar apertura en base de datos (:Caja -> :CajaService)
+        11: Notificar apertura de turno exitosa (:CajaService -> :FormCaja)
+        """
+        try:
+            monto_val = apertura_data.get("saldo_inicial", apertura_data.get("monto", 0.0))
+            monto_inicial = float(monto_val)
+        except (ValueError, TypeError):
+            monto_inicial = -1.0
+
+        # Paso 8: Validar monto de fondo no negativo (:FormCaja -> :CajaService)
+        if monto_inicial < 0:
+            return {
+                "success": False,
+                "paso": 8,
+                "error": "Paso 8: Validación fallida - El monto de fondo inicial no puede ser negativo (monto ≥ 0).",
+                "mensaje": "Paso 8: Validar monto de fondo no negativo: El monto de fondo inicial no puede ser negativo.",
+                "status_code": 400
+            }
+
         turno = apertura_data.get("turno", "Turno Mañana")
         responsable = apertura_data.get("responsable", "Personal de Mostrador")
-        observaciones = apertura_data.get("observaciones", "Apertura estándar")
+        observaciones = apertura_data.get("observaciones", "Fondo de sencillo inicial verificado en billetes y monedas")
 
         cod_sesion = f"SES-{int(datetime.now().timestamp()) % 1000000:06d}"
         now_dt = datetime.now()
 
+        # Paso 9: Registrar apertura de caja con estado abierta (:CajaService -> :Caja)
+        # Paso 10: Confirmar apertura en base de datos (:Caja -> :CajaService)
         from database import get_connection, get_cursor, is_postgres
         conn = get_connection()
         cur = get_cursor(conn)
@@ -327,10 +379,16 @@ class CajaService:
         caja = self.caja_dao.get_caja_actual()
         caja_dict = caja.to_dict()
         caja_dict["total_teorico"] = caja.saldo_teorico
+
+        # Paso 11: Notificar apertura de turno exitosa (:CajaService -> :FormCaja)
         return {
             "success": True,
-            "message": f"Turno {turno} aperturado exitosamente con fondo inicial de S/ {monto_inicial:.2f}.",
-            "caja": caja_dict
+            "paso": 11,
+            "message": f"Paso 11: Notificar apertura de turno exitosa. {turno} aperturado exitosamente con fondo inicial de S/ {monto_inicial:.2f}.",
+            "confirmacion": f"Paso 11: Apertura de turno '{turno}' confirmada en base de datos con estado Abierta.",
+            "alerta": "Paso 12: Mostrar panel de caja habilitado para cobros.",
+            "caja": caja_dict,
+            "status_code": 201
         }
 
     def registrar_egreso(self, monto: float, motivo: str) -> Dict[str, Any]:

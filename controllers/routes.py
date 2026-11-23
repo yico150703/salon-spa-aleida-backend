@@ -446,9 +446,10 @@ def get_caja():
 
 @api_bp.route("/caja/apertura", methods=["POST"])
 def post_apertura():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     res = caja_service.aperturar_caja(data)
-    return jsonify(res), (200 if res.get("success") else 400)
+    status_code = res.get("status_code", 201 if res.get("success") else 400)
+    return jsonify(res), status_code
 
 # =============================================================================
 # CUS08: PROCESAR VENTA Y COBRO
