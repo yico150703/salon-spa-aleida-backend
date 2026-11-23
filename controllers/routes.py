@@ -255,8 +255,7 @@ def post_personal():
     permisos_map = {
         "Administrador": "Control total del sistema, seguridad y parámetros",
         "Recepcionista": "Agenda de citas (CUS04), clientes (CUS03) y POS mostrador",
-        "Cajero": "Cobranzas (CUS08), arqueo de caja (CUS10) y comprobantes",
-        "Terapeuta": "Consulta de agenda de cabinas y atenciones de spa"
+        "Cajero": "Cobranzas (CUS08), arqueo de caja (CUS10) y comprobantes"
     }
     permisos = permisos_map.get(rol, f"Acceso asignado para rol {rol}")
 
