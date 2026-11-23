@@ -346,13 +346,14 @@ class VentaDAO(BaseDAO):
             )
             # Guardar detalle
             cur.execute(
-                f'INSERT INTO "DetalleComprobante" (numerocomprobante, codigitem, tipoitem, descripcion, cantidad, preciounitario, subtotal) VALUES ({self._ph(7)});',
-                (venta.numero_boleta, "SRV-01", "Servicio", venta.servicio or "Tratamiento Facial / Corporal", 1, venta.total, venta.total)
+                f'INSERT INTO "DetalleComprobante" (item, numerocomprobante, codigitem, tipoitem, descripcion, cantidad, preciounitario, subtotal) VALUES ({self._ph(8)});',
+                (1, venta.numero_boleta, "SRV-01", "Servicio", venta.servicio or "Tratamiento Facial / Corporal", 1, venta.total, venta.total)
             )
             # Guardar pago
+            cod_pago = f"PAG-{int(datetime.now().timestamp() * 1000) % 10000000}"
             cur.execute(
                 f'INSERT INTO "Pago" (codigpago, numerocomprobante, monto, mediopago, referenciaoperacion, estado) VALUES ({self._ph(6)});',
-                (f"PAG-{int(datetime.now().timestamp()) % 100000}", venta.numero_boleta, venta.total, venta.medio_pago or "Efectivo", "OP-001", "Aprobado")
+                (cod_pago, venta.numero_boleta, venta.total, venta.medio_pago or "Efectivo", "OP-001", "Aprobado")
             )
             if not is_postgres():
                 conn.commit()
@@ -412,7 +413,12 @@ class VentaDAO(BaseDAO):
 
 
 class CajaDAO(BaseDAO):
+    _active_caja: Optional[Caja] = None
+
     def get_caja_actual(self) -> Caja:
+        if CajaDAO._active_caja is not None:
+            return CajaDAO._active_caja
+
         try:
             conn = get_connection()
             cur = get_cursor(conn)
@@ -420,24 +426,31 @@ class CajaDAO(BaseDAO):
             r = cur.fetchone()
             conn.close()
             if r:
-                return Caja(
+                apertura = float(r["montoapertura"] or 150.0)
+                saldo = float(r["montocierresistema"] or apertura)
+                c = Caja(
                     id=1,
                     codigo_sesion=r["codigsesion"],
-                    cajero=r["cajero"],
-                    fecha=str(r["fechahoraapertura"]).split()[0] if r["fechahoraapertura"] else "2026-10-06",
-                    apertura=float(r["montoapertura"] or 150.0),
-                    efectivo=720.0,
-                    digital=1580.0,
-                    egresos=45.0,
-                    saldo_teorico=float(r["montocierresistema"] or 2405.0),
+                    cajero=r["cajero"] or "Personal de Caja",
+                    fecha=str(r["fechahoraapertura"]).split()[0] if r["fechahoraapertura"] else datetime.now().strftime("%Y-%m-%d"),
+                    apertura=apertura,
+                    efectivo=0.0,
+                    digital=0.0,
+                    egresos=0.0,
+                    saldo_teorico=saldo,
                     arqueo_fisico=float(r["montocierrereal"]) if r["montocierrereal"] is not None else None,
                     diferencia=float(r["diferencia"]) if r["diferencia"] is not None else None,
                     estado=r["estadosesion"] or "Abierta",
                     turno=r["turno"] or "Turno Mañana"
                 )
+                CajaDAO._active_caja = c
+                return c
         except Exception as e:
             logger.error("Error en CajaDAO.get_caja_actual: %s", e)
-        return Caja(1, datetime.now().strftime("%Y-%m-%d"), 150.0, 720.0, 1580.0, 45.0, 2405.0)
+
+        c = Caja(1, datetime.now().strftime("%Y-%m-%d"), 150.0, 0.0, 0.0, 0.0, 150.0)
+        CajaDAO._active_caja = c
+        return c
 
     def get_movimientos(self) -> List[dict]:
         try:
@@ -465,7 +478,7 @@ class CajaDAO(BaseDAO):
         try:
             conn = get_connection()
             cur = get_cursor(conn)
-            cod_mov = f"MOV-{int(datetime.now().timestamp()) % 100000:04d}"
+            cod_mov = f"MOV-{int(datetime.now().timestamp() * 1000) % 10000000}"
             ph = self._ph(7)
             cur.execute(
                 f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES ({ph});',
@@ -478,6 +491,7 @@ class CajaDAO(BaseDAO):
             logger.error("Error en CajaDAO.add_movimiento: %s", e)
 
     def update_caja(self, caja: Caja) -> Caja:
+        CajaDAO._active_caja = caja
         try:
             conn = get_connection()
             cur = get_cursor(conn)

@@ -808,12 +808,28 @@ class CajaSesion:
     def saldo_teorico(self, val): self.montocierresistema = float(val)
     @property
     def MontoCierreReal(self): return self.montocierrereal
+    @MontoCierreReal.setter
+    def MontoCierreReal(self, val): self.montocierrereal = float(val) if val is not None else None
+
     @property
-    def Diferencia(self): return self.diferencia
+    def arqueo_fisico(self): return self.montocierrereal
+    @arqueo_fisico.setter
+    def arqueo_fisico(self, val): self.montocierrereal = float(val) if val is not None else None
+
+    @property
+    def total_teorico(self): return self.montocierresistema
+    @total_teorico.setter
+    def total_teorico(self, val): self.montocierresistema = float(val) if val is not None else 0.0
+
     @property
     def EstadoSesion(self): return self.estadosesion
+    @EstadoSesion.setter
+    def EstadoSesion(self, val): self.estadosesion = val
+
     @property
     def estado(self): return self.estadosesion
+    @estado.setter
+    def estado(self, val): self.estadosesion = val
 
     # Métodos del Diagrama de Clases
     def aperturarCaja(self, monto_inicial: float, turno: str) -> bool:
