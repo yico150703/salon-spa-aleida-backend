@@ -152,14 +152,15 @@ class CitaDAO(BaseDAO):
             conn = get_connection()
             cur = get_cursor(conn)
             ph = "%s" if is_postgres() else "?"
+            alt_id = f"CIT-{int(cita_id):05d}" if str(cita_id).isdigit() else str(cita_id)
             cur.execute(f"""
                 SELECT c.codigcita, c.codigreserva, c.fecha, c.horainicio, c.horafin, c.dni_cliente, 
                        c.especialista, c.montototal, c.estado, c.motivocancelacion, c.observaciones,
                        COALESCE(cl.nombres || ' ' || cl.apellidos, c.dni_cliente) as cliente_nombre
                 FROM "Cita" c 
                 LEFT JOIN "Cliente" cl ON c.dni_cliente = cl.dni 
-                WHERE c.codigcita = {ph};
-            """, (str(cita_id),))
+                WHERE c.codigcita = {ph} OR c.codigcita = {ph};
+            """, (str(cita_id), alt_id))
             r = cur.fetchone()
             conn.close()
             if r:
@@ -241,9 +242,10 @@ class CitaDAO(BaseDAO):
             conn = get_connection()
             cur = get_cursor(conn)
             ph = "%s" if is_postgres() else "?"
+            alt_id = f"CIT-{int(cita.id):05d}" if str(cita.id).isdigit() else str(cita.id)
             cur.execute(
-                f'UPDATE "Cita" SET horainicio = {ph}, fecha = {ph}, especialista = {ph}, estado = {ph}, montototal = {ph}, motivocancelacion = {ph}, observaciones = {ph} WHERE codigcita = {ph};',
-                (cita.hora, cita.fecha, cita.especialista, cita.estado, cita.monto, cita.motivo_cancelacion, cita.servicio, str(cita.id))
+                f'UPDATE "Cita" SET horainicio = {ph}, fecha = {ph}, especialista = {ph}, estado = {ph}, montototal = {ph}, motivocancelacion = {ph}, observaciones = {ph} WHERE codigcita = {ph} OR codigcita = {ph};',
+                (cita.hora, cita.fecha, cita.especialista, cita.estado, cita.monto, cita.motivo_cancelacion, cita.servicio, str(cita.id), alt_id)
             )
             if not is_postgres():
                 conn.commit()

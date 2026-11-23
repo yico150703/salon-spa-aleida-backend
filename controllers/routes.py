@@ -354,6 +354,21 @@ def get_cliente_by_dni(dni):
 def get_citas():
     return jsonify(cita_service.listar_citas())
 
+@api_bp.route("/citas/<cita_id>", methods=["GET"])
+def get_cita_by_id(cita_id):
+    """Paso 2, 3 y 4 del Diagrama de Secuencia: Solicitar datos de cita seleccionada y consultar expediente por código."""
+    cita = cita_service.obtener_cita(cita_id)
+    if cita:
+        return jsonify({
+            "success": True,
+            "mensaje": "Paso 4: Retornar datos de cita y especialista",
+            "cita": cita
+        }), 200
+    return jsonify({
+        "success": False,
+        "error": f"Cita #{cita_id} no encontrada en el sistema."
+    }), 404
+
 @api_bp.route("/citas", methods=["POST"])
 def post_cita():
     data = request.json or {}
@@ -363,19 +378,24 @@ def post_cita():
 
 # =============================================================================
 # CUS05: REPROGRAMAR O CANCELAR CITA
-# Actor: Recepcionista
+# Actor: :Recepcionista | Límite: :FormAgenda | Control: :CitaService | Entidad: :Cita
 # =============================================================================
 @api_bp.route("/citas/<cita_id>/reprogramar", methods=["PUT"])
 def reprogram_cita(cita_id):
+    """Paso 7 del Diagrama de Secuencia: Solicitar validacion de nuevo horario."""
     data = request.json or {}
-    res = cita_service.reprogramar_cita(cita_id, data.get("nueva_fecha"), data.get("nueva_hora"))
-    return jsonify(res), (200 if res.get("success") else 400)
+    nueva_fecha = data.get("nueva_fecha")
+    nueva_hora = data.get("nueva_hora")
+    res = cita_service.reprogramar_cita(cita_id, nueva_fecha, nueva_hora)
+    status_code = res.get("status_code", 200 if res.get("success") else 400)
+    return jsonify(res), status_code
 
 @api_bp.route("/citas/<cita_id>/estado", methods=["PUT"])
 def change_cita_estado(cita_id):
     data = request.json or {}
     res = cita_service.cambiar_estado(cita_id, data.get("estado"), data.get("motivo"))
-    return jsonify(res), (200 if res.get("success") else 400)
+    status_code = res.get("status_code", 200 if res.get("success") else 400)
+    return jsonify(res), status_code
 
 # =============================================================================
 # CUS06: CONSULTAR Y REGISTRAR EN CATÁLOGO DE SERVICIOS

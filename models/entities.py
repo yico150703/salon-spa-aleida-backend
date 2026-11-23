@@ -237,8 +237,12 @@ class Cita:
     def Estado(self): return self.estado
     @property
     def MotivoCancelacion(self): return self.motivocancelacion
+    @MotivoCancelacion.setter
+    def MotivoCancelacion(self, val): self.motivocancelacion = val
     @property
     def motivo_cancelacion(self): return self.motivocancelacion
+    @motivo_cancelacion.setter
+    def motivo_cancelacion(self, val): self.motivocancelacion = val
     @property
     def Observaciones(self): return self.observaciones
 

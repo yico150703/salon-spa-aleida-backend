@@ -6,7 +6,7 @@ Conforme a la Sección 3.8.1 y 3.8.5 del Documento de Arquitectura
 =============================================================================
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from models.entities import Cita, Cliente, Venta, Caja, Compra
 from daos.repositories import (
@@ -72,51 +72,79 @@ class CitaService:
             "cita": guardada.to_dict()
         }
 
-    def reprogramar_cita(self, cita_id: int, nueva_fecha: str, nueva_hora: str) -> Dict[str, Any]:
-        """CUS05: Reprogramar cita validando disponibilidad de cabina y especialista."""
+    def obtener_cita(self, cita_id: Any) -> Optional[Dict[str, Any]]:
+        """Paso 3 y 4 de CUS Reprogramar Cita: Consultar expediente de cita por código y retornar datos de cita y especialista."""
         cita = self.cita_dao.find_by_id(cita_id)
         if not cita:
-            return {"success": False, "error": "Cita no encontrada en el sistema."}
+            return None
+        return cita.to_dict()
 
+    def reprogramar_cita(self, cita_id: Any, nueva_fecha: str, nueva_hora: str) -> Dict[str, Any]:
+        """CUS Reprogramar Cita según Diagrama de Secuencia Oficial (Pasos 7 a 15)."""
+        cita = self.cita_dao.find_by_id(cita_id)
+        if not cita:
+            return {"success": False, "error": f"Cita #{cita_id} no encontrada en el sistema.", "status_code": 404}
+
+        # Paso 8: Verificar disponibilidad de especialista
         conflicto = self.cita_dao.find_conflict(nueva_fecha, nueva_hora, cita.especialista)
-        if conflicto and conflicto.id != cita_id:
+        if conflicto and str(conflicto.id) != str(cita.id):
+            # Paso 14: Notificar conflicto de horario de especialista
+            esp_nombre = (cita.especialista or "").split("(")[0].strip()
             return {
                 "success": False,
-                "error": f"Horario no disponible: {cita.especialista} ya cuenta con una cita confirmada a las {nueva_hora} del {nueva_fecha}.",
-                "sugerencia": "Por favor seleccione otro turno horario u otra fecha disponible."
+                "paso": 14,
+                "error": f"Notificar conflicto de horario de especialista: {esp_nombre} ya cuenta con una cita en el horario {nueva_hora} del {nueva_fecha}.",
+                "mensaje": f"Paso 14: Notificar conflicto de horario de especialista: {esp_nombre} ya cuenta con una cita confirmada a las {nueva_hora} del {nueva_fecha}.",
+                "alerta": f"Paso 15: Mostrar alerta de horario ocupado en pantalla para {esp_nombre}.",
+                "especialista": esp_nombre,
+                "nueva_fecha": nueva_fecha,
+                "nueva_hora": nueva_hora,
+                "status_code": 409
             }
 
+        # Paso 9: Retornar confirmación de horario libre
+        # Paso 10: Actualizar fecha y hora de la cita
         cita.fecha = nueva_fecha
         cita.hora = nueva_hora
         cita.estado = "Reprogramada"
+
+        # Paso 11: Confirmar actualización en base de datos
         self.cita_dao.update(cita)
+
+        # Paso 12: Notificar reprogramación exitosa
         return {
             "success": True,
-            "message": f"Cita reprogramada exitosamente para el {nueva_fecha} a las {nueva_hora}. Estado actualizado a 'Reprogramada'.",
-            "cita": cita.to_dict()
+            "paso": 12,
+            "message": f"Paso 12: Notificar reprogramación exitosa. Cita reprogramada para el {nueva_fecha} a las {nueva_hora} (Estado: Reprogramada).",
+            "cita": cita.to_dict(),
+            "status_code": 200
         }
 
-    def cambiar_estado(self, cita_id: int, nuevo_estado: str, motivo: str = None) -> Dict[str, Any]:
-        """CUS04 / CUS05: Actualizar estado (Atendida, Cancelada, etc.)."""
+    def cambiar_estado(self, cita_id: Any, nuevo_estado: str, motivo: str = None) -> Dict[str, Any]:
+        """CUS04 / CUS05: Actualizar estado (Atendida, Cancelada, etc.) con persistencia en base de datos."""
         cita = self.cita_dao.find_by_id(cita_id)
         if not cita:
-            return {"success": False, "error": "Cita no encontrada en el sistema."}
+            return {"success": False, "error": f"Cita #{cita_id} no encontrada en el sistema.", "status_code": 404}
 
         if nuevo_estado == "Cancelada" and not motivo:
-            return {"success": False, "error": "Debe especificar un motivo justificado para cancelar la cita."}
+            return {
+                "success": False,
+                "error": "Debe especificar un motivo justificado para cancelar la cita y liberar el horario.",
+                "status_code": 400
+            }
 
         cita.estado = nuevo_estado
         if motivo:
             cita.motivo_cancelacion = motivo
         self.cita_dao.update(cita)
         
-        msg = f"Cita #{cita_id} actualizada a '{nuevo_estado}'."
+        msg = f"Cita #{cita_id} actualizada a '{nuevo_estado}' en base de datos."
         if nuevo_estado == "Cancelada":
-            msg = f"Cita #{cita_id} cancelada exitosamente. Horario y cabina liberados de inmediato en la agenda."
+            msg = f"Cita #{cita_id} cancelada exitosamente con motivo: '{motivo}'. Horario y cabina liberados de inmediato en la agenda."
         elif nuevo_estado == "Atendida":
             msg = f"Cita #{cita_id} marcada como 'Atendida'. Cabina liberada y lista para cobro en Caja."
 
-        return {"success": True, "message": msg, "cita": cita.to_dict()}
+        return {"success": True, "message": msg, "cita": cita.to_dict(), "status_code": 200}
 
 
 class VentaService:
