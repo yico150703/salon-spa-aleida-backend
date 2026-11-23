@@ -373,6 +373,84 @@ class VentaDAO(BaseDAO):
             logger.error("Error en VentaDAO.save: %s", e)
             return venta
 
+    def obtener_detalle_comprobante(self, numero_boleta: str) -> Optional[dict]:
+        """Pasos 3 y 4 de CUS Anular Venta: Obtener ítems y montos cobrados desde VentaComprobante y DetalleComprobante."""
+        try:
+            conn = get_connection()
+            cur = get_cursor(conn)
+            ph = "%s" if is_postgres() else "?"
+            cur.execute(f"""
+                SELECT v.numerocomprobante, v.tipocomprobante, v.serie, v.fechaemision, v.horaemision, 
+                       v.dni_cliente, v.subtotal, v.igv, v.descuentototal, v.totalneto, v.estadocomprobante, v.notacredito,
+                       COALESCE(cl.nombres || ' ' || cl.apellidos, v.dni_cliente) as cliente_nombre
+                FROM "VentaComprobante" v 
+                LEFT JOIN "Cliente" cl ON v.dni_cliente = cl.dni 
+                WHERE v.numerocomprobante = {ph};
+            """, (numero_boleta,))
+            r = cur.fetchone()
+            if not r:
+                conn.close()
+                return None
+
+            # Obtener ítems cobrados de DetalleComprobante
+            cur.execute(f"""
+                SELECT item, codigitem, descripcion, cantidad, preciounitario, subtotal
+                FROM "DetalleComprobante"
+                WHERE numerocomprobante = {ph}
+                ORDER BY item ASC;
+            """, (numero_boleta,))
+            items_rows = cur.fetchall()
+
+            # Obtener medio de pago de Pago
+            cur.execute(f"""
+                SELECT mediopago FROM "Pago" WHERE numerocomprobante = {ph} LIMIT 1;
+            """, (numero_boleta,))
+            pago_row = cur.fetchone()
+            medio_pago = pago_row["mediopago"] if pago_row else "Efectivo"
+
+            conn.close()
+
+            items = [
+                {
+                    "item": i["item"],
+                    "codigo": i["codigitem"],
+                    "descripcion": i["descripcion"],
+                    "cantidad": int(i["cantidad"] or 1),
+                    "precio": float(i["preciounitario"] or 0.0),
+                    "subtotal": float(i["subtotal"] or 0.0)
+                }
+                for i in items_rows
+            ] if items_rows else [
+                {
+                    "item": 1,
+                    "codigo": "SRV-01",
+                    "descripcion": "Tratamiento Facial / Corporal",
+                    "cantidad": 1,
+                    "precio": float(r["totalneto"] or 0.0),
+                    "subtotal": float(r["totalneto"] or 0.0)
+                }
+            ]
+
+            return {
+                "numero_boleta": r["numerocomprobante"],
+                "serie": r["serie"] or "B001",
+                "tipo_comprobante": r["tipocomprobante"] or "Boleta de Venta",
+                "fecha": f"{r['fechaemision']} {r['horaemision']}".strip(),
+                "cliente": r["cliente_nombre"],
+                "dni_cliente": r["dni_cliente"],
+                "subtotal": float(r["subtotal"] or 0.0),
+                "igv": float(r["igv"] or 0.0),
+                "descuento": float(r["descuentototal"] or 0.0),
+                "total": float(r["totalneto"] or 0.0),
+                "estado": r["estadocomprobante"],
+                "nota_credito": r["notacredito"],
+                "items": items,
+                "medio_pago": medio_pago
+            }
+        except Exception as e:
+            logger.error("Error en VentaDAO.obtener_detalle_comprobante: %s", e)
+            return None
+
     def update_estado_anulada(self, numero_boleta: str, nota_credito: str):
         try:
             conn = get_connection()

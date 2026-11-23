@@ -343,22 +343,74 @@ class VentaService:
             "status_code": 201
         }
 
+    def obtener_detalle_comprobante(self, numero_boleta: str) -> Dict[str, Any]:
+        """
+        CUS Anular Venta con Nota de Crédito: Pasos 2, 3, 4 y 5 del Diagrama BCE:
+        2: Solicitar detalle de comprobante emitido (:FormAnulacion -> :VentaService)
+        3: Obtener ítems y montos cobrados (:VentaService -> :VentaComprobante)
+        4: Retornar detalle de ítems y montos cobrados (:VentaComprobante -> :VentaService)
+        5: Enviar datos del comprobante a formulario (:VentaService -> :FormAnulacion)
+        """
+        detalle = self.venta_dao.obtener_detalle_comprobante(numero_boleta)
+        if not detalle:
+            return {
+                "success": False,
+                "error": f"Comprobante {numero_boleta} no encontrado en la base de datos.",
+                "status_code": 404
+            }
+
+        return {
+            "success": True,
+            "paso": 5,
+            "comprobante": detalle,
+            "items": detalle.get("items", []),
+            "monto_a_devolver": detalle.get("total", 0.0),
+            "mensaje": f"Paso 5: Enviar datos del comprobante {numero_boleta} a formulario."
+        }
+
     def anular_venta(self, data: dict) -> Dict[str, Any]:
-        """RF06: Anulación controlada con motivo obligatorio, PIN gerencial y Nota de Crédito."""
+        """
+        CUS Anular Venta con Nota de Crédito según Diagrama de Secuencia Oficial BCE:
+        8: Validar PIN de gerencia y registrar motivo (:FormAnulacion -> :VentaService)
+        [PIN de gerencia correcto]:
+        9: Cambiar estado de venta a 'Anulada' (:VentaService -> :VentaComprobante)
+        10: Emitir Nota de Crédito y revertir monto en caja (:VentaService -> :VentaComprobante / :Caja)
+        11: Confirmar anulación y emisión de Nota de Crédito (:VentaComprobante -> :VentaService)
+        12: Notificar anulación exitosa y adjuntar constancia (:VentaService -> :FormAnulacion)
+        13: Devolver dinero al cliente y registrar constancia (:FormAnulacion -> :Administrador)
+        [else: PIN de gerencia incorrecto]:
+        14: Notificar error de PIN y denegar operación (:VentaService -> :FormAnulacion)
+        15: Mostrar alerta de PIN no autorizado y reintentar (:FormAnulacion -> :Administrador)
+        """
         pin = str(data.get("pin", "")).strip()
+
+        # Paso 8: Validar PIN de gerencia
         if pin != "1234":
-            return {"success": False, "error": "Acceso denegado: PIN de autorización gerencial incorrecto (requiere PIN 1234)."}
+            # Paso 14: Notificar error de PIN y denegar operación
+            return {
+                "success": False,
+                "paso": 14,
+                "error": "Paso 14: Notificar error de PIN y denegar operación. PIN de autorización gerencial incorrecto (requiere PIN 1234).",
+                "mensaje": "Paso 14: Acceso denegado: El PIN gerencial ingresado no es válido.",
+                "alerta": "Paso 15: Mostrar alerta de PIN no autorizado y reintentar.",
+                "status_code": 401
+            }
 
         boleta = str(data.get("boleta", "")).strip()
         motivo = str(data.get("motivo", "")).strip()
         if not motivo:
-            return {"success": False, "error": "Debe especificar el motivo obligatorio de anulación."}
+            return {
+                "success": False,
+                "error": "Debe especificar el motivo obligatorio de anulación.",
+                "status_code": 400
+            }
 
-        # Buscar venta registrada si existe para heredar datos fiscales
-        venta = self.venta_dao.find_by_ticket(boleta) if boleta else None
-        monto = float(data.get("monto", venta.total if venta else 280.0))
-        cliente = data.get("cliente", venta.cliente if venta else "Cliente General")
-        medio_pago = data.get("medio_pago", venta.medio_pago if venta else "Digital")
+        # Paso 3 y 4: Buscar venta y comprobante
+        detalle_comp = self.venta_dao.obtener_detalle_comprobante(boleta) if boleta else None
+        monto = float(data.get("monto", detalle_comp["total"] if detalle_comp else 280.0))
+        cliente = data.get("cliente", detalle_comp["cliente"] if detalle_comp else "Cliente General")
+        medio_pago = data.get("medio_pago", detalle_comp["medio_pago"] if detalle_comp else "Efectivo")
+        items = detalle_comp.get("items", []) if detalle_comp else []
 
         nc_num = f"NC-{len(self.venta_dao.get_anulaciones()) + 13:03d}"
 
@@ -369,15 +421,17 @@ class VentaService:
             "monto": monto,
             "motivo": motivo,
             "autorizado_por": data.get("autorizado_por", "Aleida Mendoza (Gerente General)"),
-            "cliente": cliente
+            "cliente": cliente,
+            "medio_pago": medio_pago,
+            "items": items
         }
         self.venta_dao.save_anulacion(anulacion)
 
-        # Actualizar estado de la venta en base de datos
+        # Paso 9: Cambiar estado de venta a 'Anulada' (:VentaService -> :VentaComprobante)
         if boleta:
             self.venta_dao.update_estado_anulada(boleta, nc_num)
 
-        # Reversión contable en caja según medio de pago (CU04 & CU05)
+        # Paso 10: Emitir Nota de Crédito y revertir monto en caja (:VentaService -> :VentaComprobante / :Caja)
         caja = self.caja_dao.get_caja_actual()
         if "efectivo" in medio_pago.lower():
             caja.efectivo = max(0.0, float(caja.efectivo) - monto)
@@ -396,11 +450,18 @@ class VentaService:
         caja_dict = caja.to_dict()
         caja_dict["total_teorico"] = caja.saldo_teorico
 
+        # Paso 11: Confirmar anulación y emisión de Nota de Crédito (:VentaComprobante -> :VentaService)
+        # Paso 12: Notificar anulación exitosa y adjuntar constancia (:VentaService -> :FormAnulacion)
+        # Paso 13: Devolver dinero al cliente y registrar constancia (:FormAnulacion -> :Administrador)
         return {
             "success": True,
-            "message": f"Anulación autorizada por Gerencia. Se emitió la Nota de Crédito {nc_num} por S/ {monto:.2f} y se reversó el importe en caja.",
+            "paso": 12,
+            "message": f"Paso 12: Notificar anulación exitosa y adjuntar constancia. Nota de Crédito {nc_num} emitida por S/ {monto:.2f}.",
+            "confirmacion": f"Paso 11: Anulación de Boleta {boleta} y Nota de Crédito {nc_num} confirmada en base de datos.",
+            "alerta": "Paso 13: Devolver dinero al cliente y registrar constancia.",
             "anulacion": anulacion,
-            "caja": caja_dict
+            "caja": caja_dict,
+            "status_code": 201
         }
 
 

@@ -475,18 +475,24 @@ def post_venta():
     return jsonify(res), status_code
 
 # =============================================================================
-# CUS09: ANULAR VENTA CON NOTA DE CRÉDITO
-# Actor: Recepcionista / Cajero (Validación)
+# CUS09: ANULAR VENTA CON NOTA DE CRÉDITO (Diagrama BCE Oficial)
+# Actor: Administrador / Cajero
 # =============================================================================
 @api_bp.route("/anulaciones", methods=["GET"])
 def get_anulaciones():
     return jsonify(venta_dao.get_anulaciones())
 
+@api_bp.route("/anulaciones/comprobante/<numero_boleta>", methods=["GET"])
+def get_comprobante_detalle(numero_boleta):
+    res = venta_service.obtener_detalle_comprobante(numero_boleta)
+    return jsonify(res), res.get("status_code", 200 if res.get("success") else 404)
+
 @api_bp.route("/anulaciones", methods=["POST"])
 def post_anulacion():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     res = venta_service.anular_venta(data)
-    return jsonify(res), (201 if res.get("success") else 400)
+    status_code = res.get("status_code", 201 if res.get("success") else 400)
+    return jsonify(res), status_code
 
 # =============================================================================
 # CUS10: ARQUEO Y CIERRE DE CAJA
