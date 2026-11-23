@@ -363,13 +363,13 @@ def post_cita():
 # CUS05: REPROGRAMAR O CANCELAR CITA
 # Actor: Recepcionista
 # =============================================================================
-@api_bp.route("/citas/<int:cita_id>/reprogramar", methods=["PUT"])
+@api_bp.route("/citas/<cita_id>/reprogramar", methods=["PUT"])
 def reprogram_cita(cita_id):
     data = request.json or {}
     res = cita_service.reprogramar_cita(cita_id, data.get("nueva_fecha"), data.get("nueva_hora"))
     return jsonify(res), (200 if res.get("success") else 400)
 
-@api_bp.route("/citas/<int:cita_id>/estado", methods=["PUT"])
+@api_bp.route("/citas/<cita_id>/estado", methods=["PUT"])
 def change_cita_estado(cita_id):
     data = request.json or {}
     res = cita_service.cambiar_estado(cita_id, data.get("estado"), data.get("motivo"))

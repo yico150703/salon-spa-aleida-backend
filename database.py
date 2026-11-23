@@ -3,6 +3,7 @@
 CAPA DE BASE DE DATOS - CONECTOR POSTGRESQL & SQLITE (RENDER & LOCAL)
 Soporta despliegue nativo en Render PostgreSQL (DATABASE_URL)
 Con fallback transparente a SQLite para desarrollo local sin dependencias externas.
+SCHEMA OFICIAL CANÓNICO: 11 Tablas con nombres exactos de Clases de Rational Rose.
 =============================================================================
 """
 
@@ -78,326 +79,192 @@ def get_cursor(conn):
         return conn.cursor()
 
 def init_db():
-    """Crea las tablas en PostgreSQL / SQLite y carga los datos maestros iniciales."""
+    """Garantiza la existencia de las 11 tablas con nombres idénticos a las clases de Rational Rose."""
     conn = get_connection()
     cur = get_cursor(conn)
-    
     postgres_mode = is_postgres()
-    id_pk = "SERIAL PRIMARY KEY" if postgres_mode else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    
-    # 1. Tabla Clientes
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS clientes (
+
+    try:
+        cur.execute("DROP TABLE IF EXISTS anulaciones, compras, productos CASCADE;")
+    except Exception:
+        pass
+
+    # 1. "Cliente"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "Cliente" (
         dni VARCHAR(15) PRIMARY KEY,
-        nombre VARCHAR(100) NOT NULL,
+        nombres VARCHAR(100) NOT NULL,
+        apellidos VARCHAR(100) NOT NULL DEFAULT '',
         telefono VARCHAR(25),
+        direccion VARCHAR(150) DEFAULT 'Lima, Perú',
         preferencias TEXT,
-        visitas INTEGER DEFAULT 1,
-        ultima_visita VARCHAR(20),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        fecharegistro VARCHAR(30) DEFAULT '2026-10-06',
+        estadopadron VARCHAR(30) DEFAULT 'Activo',
+        correo VARCHAR(100) DEFAULT ''
     );
     """)
 
-    # 2. Tabla Servicios (Catálogo)
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS servicios (
-        id {id_pk},
+    # 2. "FichaEstetica"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "FichaEstetica" (
+        codigficha VARCHAR(30) PRIMARY KEY,
+        dni_cliente VARCHAR(15) NOT NULL REFERENCES "Cliente"(dni) ON DELETE CASCADE,
+        tipopiel VARCHAR(50) DEFAULT 'Mixta',
+        alergias TEXT DEFAULT 'Ninguna',
+        tratamientosprevios TEXT DEFAULT 'Ninguno',
+        condicionesmedicas TEXT DEFAULT 'Ninguna',
+        diagnosticoinicial TEXT DEFAULT 'Apto para tratamientos',
+        fechacreacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 3. "Cita"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "Cita" (
+        codigcita VARCHAR(30) PRIMARY KEY,
+        codigreserva VARCHAR(30) NOT NULL,
+        fecha VARCHAR(20) NOT NULL,
+        horainicio VARCHAR(20) NOT NULL,
+        horafin VARCHAR(20) DEFAULT '10:30 AM',
+        dni_cliente VARCHAR(15) NOT NULL REFERENCES "Cliente"(dni) ON DELETE CASCADE,
+        especialista VARCHAR(100) NOT NULL,
+        cabina VARCHAR(60) DEFAULT 'Cabina Estándar',
+        montototal NUMERIC(10,2) DEFAULT 0.0,
+        estado VARCHAR(30) DEFAULT 'Confirmada',
+        motivocancelacion TEXT DEFAULT '',
+        observaciones TEXT DEFAULT ''
+    );
+    """)
+
+    # 4. "Servicio"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "Servicio" (
+        codigservicio VARCHAR(30) PRIMARY KEY,
         nombre VARCHAR(120) NOT NULL,
         categoria VARCHAR(60) NOT NULL,
-        duracion INTEGER NOT NULL,
-        precio NUMERIC(10,2) NOT NULL,
-        comision INTEGER DEFAULT 25,
-        activo BOOLEAN DEFAULT TRUE
+        preciobase NUMERIC(10,2) NOT NULL,
+        duracionminutos INTEGER NOT NULL,
+        cabinarequerida VARCHAR(60) DEFAULT 'Cabina Estándar',
+        porcentajecomision NUMERIC(5,2) DEFAULT 25.0,
+        estadoactivo BOOLEAN DEFAULT TRUE
     );
     """)
 
-    # 3. Tabla Insumos / Productos
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS productos (
-        id {id_pk},
-        nombre VARCHAR(150) NOT NULL,
-        proveedor VARCHAR(120) NOT NULL,
-        stock INTEGER NOT NULL DEFAULT 0,
-        stock_min INTEGER NOT NULL DEFAULT 5,
-        costo NUMERIC(10,2) NOT NULL DEFAULT 0.0,
-        precio_venta NUMERIC(10,2) NOT NULL DEFAULT 0.0,
-        alerta BOOLEAN DEFAULT FALSE
+    # 5. "Promocion"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "Promocion" (
+        codigpromocion VARCHAR(30) PRIMARY KEY,
+        nombre VARCHAR(120) NOT NULL,
+        porcentajedescuento NUMERIC(5,2) DEFAULT 0.0,
+        montodescuento NUMERIC(10,2) DEFAULT 0.0,
+        fechainicio VARCHAR(20) NOT NULL,
+        fechafin VARCHAR(20) NOT NULL,
+        condiciones TEXT DEFAULT 'Válido días hábiles',
+        estado VARCHAR(20) DEFAULT 'Vigente'
     );
     """)
 
-    # 4. Tabla Citas
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS citas (
-        id {id_pk},
-        hora VARCHAR(20) NOT NULL,
-        fecha VARCHAR(20) NOT NULL,
-        cliente VARCHAR(100) NOT NULL,
-        dni VARCHAR(15) NOT NULL,
-        servicio VARCHAR(120) NOT NULL,
-        especialista VARCHAR(100) NOT NULL,
-        estado VARCHAR(30) DEFAULT 'Confirmada',
-        monto NUMERIC(10,2) DEFAULT 0.0,
-        cobrado BOOLEAN DEFAULT FALSE,
-        motivo_cancelacion TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-
-    # 5. Tabla Ventas (Boletas Electrónicas con IGV 18%)
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS ventas (
-        id {id_pk},
-        numero_boleta VARCHAR(30) UNIQUE NOT NULL,
-        fecha VARCHAR(30) NOT NULL,
-        cliente VARCHAR(100) NOT NULL,
-        servicio VARCHAR(120) NOT NULL,
+    # 6. "VentaComprobante"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "VentaComprobante" (
+        numerocomprobante VARCHAR(30) PRIMARY KEY,
+        tipocomprobante VARCHAR(40) DEFAULT 'Boleta de Venta',
+        serie VARCHAR(10) DEFAULT 'B001',
+        fechaemision VARCHAR(30) NOT NULL,
+        horaemision VARCHAR(20) DEFAULT '09:45 AM',
+        dni_cliente VARCHAR(15) REFERENCES "Cliente"(dni),
         subtotal NUMERIC(10,2) NOT NULL,
         igv NUMERIC(10,2) NOT NULL,
-        descuento NUMERIC(10,2) DEFAULT 0.0,
-        total NUMERIC(10,2) NOT NULL,
-        medio_pago VARCHAR(40) NOT NULL,
-        estado VARCHAR(25) DEFAULT 'Emitida',
-        nota_credito VARCHAR(30)
+        descuentototal NUMERIC(10,2) DEFAULT 0.0,
+        totalneto NUMERIC(10,2) NOT NULL,
+        estadocomprobante VARCHAR(25) DEFAULT 'Emitida',
+        notacredito VARCHAR(30)
     );
     """)
 
-    # 6. Tabla Anulaciones / Notas de Crédito
+    # 7. "DetalleComprobante"
+    item_pk = "SERIAL PRIMARY KEY" if postgres_mode else "INTEGER PRIMARY KEY AUTOINCREMENT"
     cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS anulaciones (
-        id {id_pk},
-        fecha VARCHAR(30) NOT NULL,
-        boleta VARCHAR(30) NOT NULL,
-        nota_credito VARCHAR(30) NOT NULL,
+    CREATE TABLE IF NOT EXISTS "DetalleComprobante" (
+        item {item_pk},
+        numerocomprobante VARCHAR(30) NOT NULL REFERENCES "VentaComprobante"(numerocomprobante) ON DELETE CASCADE,
+        codigitem VARCHAR(30) NOT NULL,
+        tipoitem VARCHAR(30) DEFAULT 'Servicio',
+        descripcion TEXT NOT NULL,
+        cantidad INTEGER NOT NULL DEFAULT 1,
+        preciounitario NUMERIC(10,2) NOT NULL,
+        subtotal NUMERIC(10,2) NOT NULL
+    );
+    """)
+
+    # 8. "Pago"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "Pago" (
+        codigpago VARCHAR(30) PRIMARY KEY,
+        numerocomprobante VARCHAR(30) NOT NULL REFERENCES "VentaComprobante"(numerocomprobante) ON DELETE CASCADE,
         monto NUMERIC(10,2) NOT NULL,
-        motivo TEXT NOT NULL,
-        autorizado_por VARCHAR(100) NOT NULL
+        mediopago VARCHAR(40) NOT NULL,
+        referenciaoperacion VARCHAR(60),
+        fechahora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        estado VARCHAR(25) DEFAULT 'Aprobado'
     );
     """)
 
-    # 7. Tabla Caja
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS caja (
-        id {id_pk},
-        fecha VARCHAR(20) NOT NULL,
-        apertura NUMERIC(10,2) DEFAULT 150.0,
-        efectivo NUMERIC(10,2) DEFAULT 0.0,
-        digital NUMERIC(10,2) DEFAULT 0.0,
-        egresos NUMERIC(10,2) DEFAULT 0.0,
-        saldo_teorico NUMERIC(10,2) DEFAULT 150.0,
-        arqueo_fisico NUMERIC(10,2),
+    # 9. "CajaSesion"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "CajaSesion" (
+        codigsesion VARCHAR(30) PRIMARY KEY,
+        cajero VARCHAR(100) NOT NULL,
+        turno VARCHAR(30) NOT NULL,
+        montoapertura NUMERIC(10,2) DEFAULT 150.0,
+        fechahoraapertura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        montocierresistema NUMERIC(10,2) DEFAULT 150.0,
+        montocierrereal NUMERIC(10,2),
         diferencia NUMERIC(10,2),
-        estado VARCHAR(20) DEFAULT 'Abierta',
-        turno VARCHAR(30) DEFAULT 'Turno Mañana'
+        estadosesion VARCHAR(20) DEFAULT 'Abierta'
     );
     """)
 
-    # 8. Tabla Movimientos de Caja
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS caja_movimientos (
-        id {id_pk},
-        hora VARCHAR(20) NOT NULL,
-        tipo VARCHAR(30) NOT NULL,
+    # 10. "MovimientoCaja"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "MovimientoCaja" (
+        codigmovimiento VARCHAR(30) PRIMARY KEY,
+        codigsesion VARCHAR(30) NOT NULL REFERENCES "CajaSesion"(codigsesion) ON DELETE CASCADE,
+        tipomovimiento VARCHAR(30) NOT NULL,
+        concepto TEXT NOT NULL,
         monto NUMERIC(10,2) NOT NULL,
-        detalle TEXT NOT NULL
+        fechahora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        autorizadopor VARCHAR(100) DEFAULT 'Administrador'
     );
     """)
 
-    # 9. Tabla Órdenes de Compra
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS compras (
-        id {id_pk},
-        numero_oc VARCHAR(30) UNIQUE NOT NULL,
-        fecha VARCHAR(20) NOT NULL,
-        proveedor VARCHAR(120) NOT NULL,
-        insumo VARCHAR(150) NOT NULL,
-        cantidad INTEGER NOT NULL,
-        monto_total NUMERIC(10,2) NOT NULL,
-        estado VARCHAR(30) DEFAULT 'En Tránsito'
-    );
-    """)
-
-    # 10. Tabla Usuarios del Sistema
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        usuario VARCHAR(50) PRIMARY KEY,
-        nombre VARCHAR(100) NOT NULL,
-        rol VARCHAR(50) NOT NULL,
-        permisos TEXT NOT NULL,
-        activo BOOLEAN DEFAULT TRUE,
+    # 11. "Usuario"
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "Usuario" (
+        username VARCHAR(50) PRIMARY KEY,
+        codigusuario VARCHAR(30) DEFAULT 'USR-001',
+        passwordhash VARCHAR(100) DEFAULT '1234',
+        nombres VARCHAR(100) NOT NULL,
+        apellidos VARCHAR(100) DEFAULT '',
         dni VARCHAR(15),
-        password_temporal VARCHAR(100),
-        telefono VARCHAR(25),
-        email VARCHAR(100)
+        rol VARCHAR(50) NOT NULL,
+        turno VARCHAR(50) DEFAULT 'Turno Mañana',
+        celular VARCHAR(25),
+        email VARCHAR(100),
+        estado BOOLEAN DEFAULT TRUE
     );
     """)
 
-    # Migración de columnas adicionales en usuarios si ya existía la tabla
+    # Vista sinónima "VentasComprobante"
     try:
         if postgres_mode:
-            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS dni VARCHAR(15);")
-            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_temporal VARCHAR(100);")
-            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS telefono VARCHAR(25);")
-            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email VARCHAR(100);")
+            cur.execute('CREATE OR REPLACE VIEW "VentasComprobante" AS SELECT * FROM "VentaComprobante";')
         else:
-            cur.execute("PRAGMA table_info(usuarios);")
-            cols = [r["name"] if isinstance(r, dict) else r[1] for r in cur.fetchall()]
-            if "dni" not in cols:
-                cur.execute("ALTER TABLE usuarios ADD COLUMN dni VARCHAR(15);")
-            if "password_temporal" not in cols:
-                cur.execute("ALTER TABLE usuarios ADD COLUMN password_temporal VARCHAR(100);")
-            if "telefono" not in cols:
-                cur.execute("ALTER TABLE usuarios ADD COLUMN telefono VARCHAR(25);")
-            if "email" not in cols:
-                cur.execute("ALTER TABLE usuarios ADD COLUMN email VARCHAR(100);")
-            conn.commit()
-    except Exception as e:
-        logger.warning("Aviso durante migración de columnas en usuarios: %s", e)
+            cur.execute('CREATE VIEW IF NOT EXISTS "VentasComprobante" AS SELECT * FROM "VentaComprobante";')
+    except Exception:
+        pass
 
     if not postgres_mode:
         conn.commit()
-
-    # Sembrar datos maestros si las tablas están vacías
-    seed_initial_data(conn, cur, postgres_mode)
     conn.close()
-    logger.info("Base de datos inicializada correctamente en modo: %s", "PostgreSQL (Render)" if postgres_mode else "SQLite (Local)")
-
-def seed_initial_data(conn, cur, postgres_mode):
-    """Puebla las tablas con los registros canónicos del Modelo Spa Aleida."""
-    # Clientes
-    cur.execute("SELECT COUNT(*) AS c FROM clientes;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        clientes = [
-            ("72819382", "Mariana Torres", "987654321", "Piel mixta, prefiere aromaterapia de lavanda.", 12, "2026-10-06"),
-            ("45910284", "Patricia Valdivia", "945112233", "Sensibilidad a tintes con amoníaco.", 8, "2026-10-06"),
-            ("48192039", "Claudia Morales", "912345678", "Tratamiento keratina semestral.", 5, "2026-10-06"),
-            ("70829104", "Jessica Rivas", "923456789", "Manicura semipermanente color nude.", 3, "2026-10-05")
-        ]
-        ph = "%s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?"
-        for c in clientes:
-            cur.execute(f"INSERT INTO clientes (dni, nombre, telefono, preferencias, visitas, ultima_visita) VALUES ({ph})", c)
-
-    # Servicios
-    cur.execute("SELECT COUNT(*) AS c FROM servicios;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        servicios = [
-            ("Masaje Relajante Aleida", "Spa & Bienestar", 90, 280.0, 25, True),
-            ("Facial Rejuvenecedor con Oro", "Cosmiatría Facial", 75, 450.0, 30, True),
-            ("Tratamiento Capilar Keratina", "Cuidado Capilar", 120, 350.0, 30, True),
-            ("Manicura Spa Premium", "Manos & Pies", 60, 150.0, 35, True)
-        ]
-        ph = "%s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?"
-        for s in servicios:
-            cur.execute(f"INSERT INTO servicios (nombre, categoria, duracion, precio, comision, activo) VALUES ({ph})", s)
-
-    # Productos
-    cur.execute("SELECT COUNT(*) AS c FROM productos;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        productos = [
-            ("Tinte Profesional 6.1 (Cenizo)", "L'Oréal Professionnel Perú", 2, 6, 28.0, 45.0, True),
-            ("Crema Nutritiva Keratina 1L", "Distribuidora Belleza Total SAC", 1, 4, 85.0, 130.0, True),
-            ("Aceite de Argán Puro 250ml", "BioCosmetics Natura", 8, 3, 35.0, 60.0, False)
-        ]
-        ph = "%s, %s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?, ?"
-        for p in productos:
-            cur.execute(f"INSERT INTO productos (nombre, proveedor, stock, stock_min, costo, precio_venta, alerta) VALUES ({ph})", p)
-
-    # Citas
-    cur.execute("SELECT COUNT(*) AS c FROM citas;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        citas = [
-            ("09:00 AM", "2026-10-06", "Mariana Torres", "72819382", "Masaje Relajante Aleida", "Carmen Sánchez", "Atendida", 280.0, True, None),
-            ("10:30 AM", "2026-10-06", "Patricia Valdivia", "45910284", "Facial Rejuvenecedor con Oro", "Carmen Sánchez", "Confirmada", 450.0, False, None),
-            ("11:45 AM", "2026-10-06", "Claudia Morales", "48192039", "Tratamiento Capilar Keratina", "Luisa Paredes", "En Atención", 350.0, False, None),
-            ("02:30 PM", "2026-10-06", "Jessica Rivas", "70829104", "Manicura Spa Premium", "Ana Vargas", "Pendiente", 150.0, False, None)
-        ]
-        ph = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
-        for ci in citas:
-            cur.execute(f"INSERT INTO citas (hora, fecha, cliente, dni, servicio, especialista, estado, monto, cobrado, motivo_cancelacion) VALUES ({ph})", ci)
-
-    # Ventas
-    cur.execute("SELECT COUNT(*) AS c FROM ventas;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        ventas = [
-            ("B001-0004820", "2026-10-06 09:45", "Mariana Torres", "Masaje Relajante Aleida", 237.29, 42.71, 0.0, 280.0, "Efectivo", "Emitida", None)
-        ]
-        ph = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
-        for v in ventas:
-            cur.execute(f"INSERT INTO ventas (numero_boleta, fecha, cliente, servicio, subtotal, igv, descuento, total, medio_pago, estado, nota_credito) VALUES ({ph})", v)
-
-    # Anulaciones
-    cur.execute("SELECT COUNT(*) AS c FROM anulaciones;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        anulaciones = [
-            ("2026-10-05 16:30", "B001-0004810", "NC-012", 120.0, "Devolución por insatisfacción", "Aleida Mendoza (Gerente)")
-        ]
-        ph = "%s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?"
-        for a in anulaciones:
-            cur.execute(f"INSERT INTO anulaciones (fecha, boleta, nota_credito, monto, motivo, autorizado_por) VALUES ({ph})", a)
-
-    # Caja y Movimientos
-    cur.execute("SELECT COUNT(*) AS c FROM caja;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        cur.execute(
-            f"INSERT INTO caja (fecha, apertura, efectivo, digital, egresos, saldo_teorico, estado, turno) "
-            f"VALUES ({'%s, %s, %s, %s, %s, %s, %s, %s' if postgres_mode else '?, ?, ?, ?, ?, ?, ?, ?'})",
-            ("2026-10-06", 150.0, 720.0, 1580.0, 45.0, 2405.0, "Abierta", "Turno Mañana")
-        )
-        movimientos = [
-            ("08:30 AM", "Apertura", 150.0, "Fondo de sencillo inicial (RF07)"),
-            ("09:45 AM", "Ingreso", 280.0, "Cobro Boleta B001-4820 en Efectivo (RF05)"),
-            ("11:00 AM", "Egreso", -45.0, "Salida menor por refrigerio de colaboradores (RF07)"),
-            ("11:30 AM", "Ingreso", 450.0, "Cobro Boleta B001-4821 vía Yape (RF05)"),
-            ("01:15 PM", "Ingreso", 350.0, "Cobro Boleta B001-4822 con Tarjeta POS (RF05)")
-        ]
-        ph = "%s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?"
-        for m in movimientos:
-            cur.execute(f"INSERT INTO caja_movimientos (hora, tipo, monto, detalle) VALUES ({ph})", m)
-
-    # Compras
-    cur.execute("SELECT COUNT(*) AS c FROM compras;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        compras = [
-            ("OC-2026-088", "2026-10-05", "L'Oréal Professionnel Perú", "Tinte Profesional 6.1 (12 unidades)", 12, 336.0, "En Tránsito")
-        ]
-        ph = "%s, %s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?, ?"
-        for co in compras:
-            cur.execute(f"INSERT INTO compras (numero_oc, fecha, proveedor, insumo, cantidad, monto_total, estado) VALUES ({ph})", co)
-
-    # Usuarios
-    cur.execute("SELECT COUNT(*) AS c FROM usuarios;")
-    row = cur.fetchone()
-    count = row['c'] if isinstance(row, dict) else row[0]
-    if count == 0:
-        usuarios = [
-            ("admin", "Aleida Mendoza", "Administrador", "personal,catalogo,anulaciones,operaciones-caja", "40123456", "1234", "999888777", "admin@spaaleida.pe"),
-            ("recepcion", "Camila Ramos", "Recepcionista", "agenda,clientes,reprogramar", "71234567", "1234", "987654321", "recepcion@spaaleida.pe"),
-            ("cajero", "Javier Torres", "Cajero", "apertura,caja,anulaciones,operaciones-caja", "72345678", "1234", "976543210", "cajero@spaaleida.pe")
-        ]
-        ph = "%s, %s, %s, %s, %s, %s, %s, %s" if postgres_mode else "?, ?, ?, ?, ?, ?, ?, ?"
-        for u in usuarios:
-            cur.execute(f"INSERT INTO usuarios (usuario, nombre, rol, permisos, dni, password_temporal, telefono, email) VALUES ({ph})", u)
-    else:
-        # Asegurar credenciales temporales en los 3 usuarios canónicos
-        try:
-            cur.execute("UPDATE usuarios SET password_temporal = '1234' WHERE usuario IN ('admin', 'recepcion', 'cajero') AND (password_temporal IS NULL OR password_temporal = '');")
-        except Exception:
-            pass
-
-    if not postgres_mode:
-        conn.commit()
+    logger.info("Base de datos verificada con las 11 tablas canónicas de Rational Rose (CamelCase).")

@@ -22,16 +22,16 @@ def listar_usuarios():
     
     query = """
         SELECT 
-            usuario,
-            password_temporal AS password,
-            nombre,
+            username,
+            passwordhash AS password,
+            nombres,
             rol,
             dni,
-            telefono,
+            celular,
             email,
-            activo
-        FROM usuarios
-        ORDER BY rol, usuario;
+            estado
+        FROM "Usuario"
+        ORDER BY rol, username;
     """
     
     try:
@@ -47,9 +47,9 @@ def listar_usuarios():
         print("-" * 85)
         
         for u in usuarios:
-            user = u['usuario'] if isinstance(u, dict) else u[0]
+            user = u['username'] if isinstance(u, dict) else u[0]
             pwd = (u['password'] if isinstance(u, dict) else u[1]) or '(Sin asignar)'
-            nombre = u['nombre'] if isinstance(u, dict) else u[2]
+            nombre = u['nombres'] if isinstance(u, dict) else u[2]
             rol = u['rol'] if isinstance(u, dict) else u[3]
             dni = (u['dni'] if isinstance(u, dict) else u[4]) or '—'
             
