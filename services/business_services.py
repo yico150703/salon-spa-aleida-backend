@@ -156,19 +156,106 @@ class VentaService:
     def listar_ventas(self) -> List[dict]:
         return [v.to_dict() for v in self.venta_dao.find_all()]
 
+    def liquidar_cita(self, cita_id: Any) -> Dict[str, Any]:
+        """
+        CUS Procesar Venta y Cobro: Pasos 2, 3 y 4 del Diagrama de Secuencia Oficial BCE:
+        2: Solicitar liquidación de cita con estado Atendida (:FormPOS -> :VentaService)
+        3: Calcular subtotal e impuesto IGV de atención culminada (:VentaService -> :Venta)
+        4: Retornar desglose de importes y total (:Venta -> :VentaService)
+        """
+        cita = self.cita_dao.find_by_id(cita_id)
+        if not cita:
+            return {
+                "success": False,
+                "error": f"Cita #{cita_id} no encontrada para liquidación.",
+                "status_code": 404
+            }
+
+        total = float(cita.monto or 0.0)
+        subtotal = round(total / 1.18, 2)
+        igv = round(total - subtotal, 2)
+
+        return {
+            "success": True,
+            "paso": 4,
+            "cita_id": str(cita.id),
+            "cliente": cita.cliente,
+            "dni": cita.dni,
+            "servicio": cita.servicio,
+            "especialista": cita.especialista,
+            "estado": cita.estado,
+            "subtotal": subtotal,
+            "igv": igv,
+            "total": total,
+            "desglose": {
+                "base_imponible": subtotal,
+                "igv_18": igv,
+                "total_a_pagar": total
+            },
+            "mensaje": f"Paso 4: Retornar desglose de importes y total (Subtotal: S/ {subtotal:.2f}, IGV: S/ {igv:.2f}, Total: S/ {total:.2f})."
+        }
+
     def procesar_venta(self, data: dict) -> Dict[str, Any]:
-        """RF04 y RF05: Liquidación, cálculo de IGV 18%, emisión de boleta y actualización de caja."""
-        total = float(data.get("monto", 0.0))
+        """
+        CUS Procesar Venta y Cobro según Diagrama de Secuencia Oficial BCE:
+        8: Validar pago conforme y caja abierta (:FormPOS -> :VentaService)
+        [Pago Conforme y Caja Abierta]:
+        9: Registrar venta y numero de boleta (:VentaService -> :Venta)
+        10: Confirmar registro y actualizar cita (:Venta -> :VentaService)
+        11: Notificar venta procesada con exito (:VentaService -> :FormPOS)
+        12: Mostrar boleta de venta para imprimir (:FormPOS -> :Cajero)
+        [Monto Insuficiente o Pago Invalido]:
+        13: Notificar importe menor al total a pagar (:VentaService -> :FormPOS)
+        14: Mostrar alerta de saldo insuficiente en pantalla (:FormPOS -> :Cajero)
+        """
+        # Paso 8: Validar caja abierta
+        caja = self.caja_dao.get_caja_actual()
+        if str(caja.estado).strip().lower() != "abierta":
+            return {
+                "success": False,
+                "paso": 8,
+                "error": "Paso 8: Validación fallida - La caja de turno no se encuentra abierta. Debe aperturar caja antes de procesar cobros.",
+                "mensaje": "Paso 8: La caja se encuentra cerrada. Debe aperturar el turno en el módulo de Caja.",
+                "status_code": 400
+            }
+
+        total_base = float(data.get("monto", 0.0))
+        descuento = float(data.get("descuento", 0.0))
+        total_neto = max(0.0, round(total_base - descuento, 2))
+
+        # Paso 8: Validar pago conforme (monto ingresado >= total a pagar)
+        monto_ingresado_raw = data.get("monto_ingresado", data.get("pago", data.get("monto_pagado", total_neto)))
+        try:
+            monto_ingresado = float(monto_ingresado_raw)
+        except (ValueError, TypeError):
+            monto_ingresado = 0.0
+
+        if monto_ingresado < total_neto:
+            # Paso 13: Notificar importe menor al total a pagar
+            faltante = round(total_neto - monto_ingresado, 2)
+            return {
+                "success": False,
+                "paso": 13,
+                "error": f"Paso 13: Notificar importe menor al total a pagar. Monto ingresado S/ {monto_ingresado:.2f} es insuficiente para cubrir el total de S/ {total_neto:.2f}.",
+                "mensaje": f"Paso 13: Notificar importe menor al total a pagar (Faltan S/ {faltante:.2f}).",
+                "alerta": f"Paso 14: Mostrar alerta de saldo insuficiente en pantalla (Faltan S/ {faltante:.2f}).",
+                "monto_ingresado": monto_ingresado,
+                "total_neto": total_neto,
+                "faltante": faltante,
+                "status_code": 400
+            }
+
         cliente = data.get("cliente", "Cliente General")
+        dni_cliente = data.get("dni", "72819382")
         servicio = data.get("servicio", "Servicio Spa")
         medio_pago = data.get("medio_pago", "Efectivo")
-        descuento = float(data.get("descuento", 0.0))
+        cita_id = data.get("cita_id")
 
-        total_neto = max(0.0, total - descuento)
-        # Regla Tributaria Peruana: Desglose de IGV 18%
+        # Regla Tributaria SUNAT: Desglose de IGV 18%
         subtotal = round(total_neto / 1.18, 2)
         igv = round(total_neto - subtotal, 2)
 
+        # Paso 9: Registrar venta y numero de boleta (:VentaService -> :Venta)
         num_boleta = f"B001-{len(self.venta_dao.find_all()) + 4821:07d}"
 
         nueva_venta = Venta(
@@ -176,6 +263,7 @@ class VentaService:
             numero_boleta=num_boleta,
             fecha=datetime.now().strftime("%Y-%m-%d %H:%M"),
             cliente=cliente,
+            dni_cliente=dni_cliente,
             servicio=servicio,
             subtotal=subtotal,
             igv=igv,
@@ -186,37 +274,73 @@ class VentaService:
         )
         guardada = self.venta_dao.save(nueva_venta)
 
-        # Actualizar estado de cita asociada
-        for c in self.cita_dao.find_all():
-            if c.cliente.lower() == cliente.lower() and not c.cobrado:
+        # Paso 10: Confirmar registro y actualizar cita (:Venta -> :VentaService)
+        cita_actualizada = None
+        if cita_id:
+            c = self.cita_dao.find_by_id(cita_id)
+            if c:
                 c.cobrado = True
-                c.estado = "Atendida"
+                c.estado = "Cobrada"
+                c.observaciones = f"{c.servicio} · Cobrado con Boleta {num_boleta}"
                 self.cita_dao.update(c)
-                break
+                cita_actualizada = c.to_dict()
 
-        # Actualizar balances de caja
-        caja = self.caja_dao.get_caja_actual()
-        if medio_pago == "Efectivo":
+        if not cita_actualizada:
+            for c in self.cita_dao.find_all():
+                if (c.cliente.lower() == cliente.lower() or (c.dni and c.dni == dni_cliente)) and not c.cobrado:
+                    c.cobrado = True
+                    c.estado = "Cobrada"
+                    c.observaciones = f"{c.servicio} · Cobrado con Boleta {num_boleta}"
+                    self.cita_dao.update(c)
+                    cita_actualizada = c.to_dict()
+                    break
+
+        # Actualizar balances de caja e insertar movimiento de ingreso
+        if "efectivo" in medio_pago.lower():
             caja.efectivo += total_neto
         else:
             caja.digital += total_neto
-        caja.saldo_teorico = round(caja.apertura + caja.efectivo + caja.digital - caja.egresos, 2)
+        caja.saldo_teorico = round(float(caja.apertura) + float(caja.efectivo) + float(caja.digital) - float(caja.egresos), 2)
         self.caja_dao.update_caja(caja)
 
         self.caja_dao.add_movimiento(
             tipo="Ingreso",
             monto=total_neto,
-            detalle=f"Cobro Boleta {num_boleta} ({medio_pago})"
+            detalle=f"Cobro Boleta {num_boleta} ({medio_pago}) - {cliente}"
         )
 
         caja_dict = caja.to_dict()
         caja_dict["total_teorico"] = caja.saldo_teorico
 
+        # Paso 11: Notificar venta procesada con exito (:VentaService -> :FormPOS)
+        # Paso 12: Mostrar boleta de venta para imprimir (:FormPOS -> :Cajero)
+        vuelto = round(max(0.0, monto_ingresado - total_neto), 2) if "efectivo" in medio_pago.lower() else 0.0
+
         return {
             "success": True,
-            "message": f"Boleta {num_boleta} emitida exitosamente por S/ {total_neto:.2f}.",
+            "paso": 11,
+            "message": f"Paso 11: Notificar venta procesada con éxito. Boleta {num_boleta} emitida por S/ {total_neto:.2f}.",
+            "confirmacion": f"Paso 10: Venta {num_boleta} confirmada en base de datos y cita de {cliente} actualizada a 'Cobrada'.",
+            "alerta": "Paso 12: Mostrar boleta de venta para imprimir.",
+            "boleta": {
+                "numero_boleta": num_boleta,
+                "serie": "B001",
+                "cliente": cliente,
+                "dni_cliente": dni_cliente,
+                "servicio": servicio,
+                "subtotal": subtotal,
+                "igv": igv,
+                "total": total_neto,
+                "medio_pago": medio_pago,
+                "monto_ingresado": monto_ingresado,
+                "vuelto": vuelto,
+                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+            },
             "venta": guardada.to_dict(),
-            "caja": caja_dict
+            "cita": cita_actualizada,
+            "caja": caja_dict,
+            "vuelto": vuelto,
+            "status_code": 201
         }
 
     def anular_venta(self, data: dict) -> Dict[str, Any]:

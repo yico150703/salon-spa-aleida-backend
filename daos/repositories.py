@@ -137,7 +137,7 @@ class CitaDAO(BaseDAO):
                     especialista=r["especialista"],
                     estado=r["estado"],
                     monto=float(r["montototal"] or 0.0),
-                    cobrado=bool(r["estado"] == "Atendida"),
+                    cobrado=bool(r["estado"] == "Cobrada" or "boleta" in str(r.get("observaciones", "") or "").lower() or "cobrado" in str(r.get("observaciones", "") or "").lower()),
                     motivo_cancelacion=r["motivocancelacion"],
                     cabina=r.get("cabina", "Cabina 01 - Facial Oro")
                 )
@@ -174,7 +174,7 @@ class CitaDAO(BaseDAO):
                     especialista=r["especialista"],
                     estado=r["estado"],
                     monto=float(r["montototal"] or 0.0),
-                    cobrado=bool(r["estado"] == "Atendida"),
+                    cobrado=bool(r["estado"] == "Cobrada" or "boleta" in str(r.get("observaciones", "") or "").lower() or "cobrado" in str(r.get("observaciones", "") or "").lower()),
                     motivo_cancelacion=r["motivocancelacion"]
                 )
             return None

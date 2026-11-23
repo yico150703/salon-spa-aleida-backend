@@ -452,18 +452,27 @@ def post_apertura():
     return jsonify(res), status_code
 
 # =============================================================================
-# CUS08: PROCESAR VENTA Y COBRO
+# CUS08: PROCESAR VENTA Y COBRO (Diagrama BCE Oficial)
 # Actor: Recepcionista / Cajero
 # =============================================================================
 @api_bp.route("/ventas", methods=["GET"])
 def get_ventas():
     return jsonify(venta_service.listar_ventas())
 
+@api_bp.route("/ventas/liquidar/<cita_id>", methods=["GET"])
+@api_bp.route("/ventas/liquidar", methods=["POST"])
+def liquidar_cita(cita_id=None):
+    if not cita_id and request.is_json:
+        cita_id = (request.get_json(silent=True) or {}).get("cita_id")
+    res = venta_service.liquidar_cita(cita_id)
+    return jsonify(res), res.get("status_code", 200 if res.get("success") else 400)
+
 @api_bp.route("/ventas", methods=["POST"])
 def post_venta():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     res = venta_service.procesar_venta(data)
-    return jsonify(res), (201 if res.get("success") else 400)
+    status_code = res.get("status_code", 201 if res.get("success") else 400)
+    return jsonify(res), status_code
 
 # =============================================================================
 # CUS09: ANULAR VENTA CON NOTA DE CRÉDITO
