@@ -408,6 +408,12 @@ class Usuario:
         self.email = email
         self.estado = estado if estado is not None else kwargs.get('activo', True)
         self.permisos = kwargs.get('permisos', '')
+        self._password_temporal = kwargs.get('password_temporal', '')
+
+    @property
+    def password_temporal(self): return getattr(self, '_password_temporal', '')
+    @password_temporal.setter
+    def password_temporal(self, val): self._password_temporal = val
 
     # Propiedades de compatibilidad
     @property
