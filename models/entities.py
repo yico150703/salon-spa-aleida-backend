@@ -340,18 +340,36 @@ class Servicio:
     def precio(self, val): self.preciobase = float(val)
     @property
     def DuracionMinutos(self): return self.duracionminutos
+    @DuracionMinutos.setter
+    def DuracionMinutos(self, val): self.duracionminutos = int(val)
     @property
     def duracion(self): return self.duracionminutos
+    @duracion.setter
+    def duracion(self, val): self.duracionminutos = int(val)
     @property
     def CabinaRequerida(self): return self.cabinarequerida
+    @CabinaRequerida.setter
+    def CabinaRequerida(self, val): self.cabinarequerida = str(val)
+    @property
+    def cabina_requerida(self): return self.cabinarequerida
+    @cabina_requerida.setter
+    def cabina_requerida(self, val): self.cabinarequerida = str(val)
     @property
     def PorcentajeComision(self): return self.porcentajecomision
+    @PorcentajeComision.setter
+    def PorcentajeComision(self, val): self.porcentajecomision = float(val)
     @property
     def comision(self): return int(self.porcentajecomision)
+    @comision.setter
+    def comision(self, val): self.porcentajecomision = float(val)
     @property
     def EstadoActivo(self): return self.estadoactivo
+    @EstadoActivo.setter
+    def EstadoActivo(self, val): self.estadoactivo = bool(val)
     @property
     def activo(self): return self.estadoactivo
+    @activo.setter
+    def activo(self, val): self.estadoactivo = bool(val)
 
     # Métodos del Diagrama de Clases
     def registrarServicio(self) -> bool:

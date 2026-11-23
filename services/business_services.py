@@ -8,7 +8,7 @@ Conforme a la Sección 3.8.1 y 3.8.5 del Documento de Arquitectura
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from models.entities import Cita, Cliente, Venta, Caja, Compra
+from models.entities import Cita, Cliente, Venta, Caja, Compra, Servicio
 from daos.repositories import (
     ClienteDAO, CitaDAO, VentaDAO, CajaDAO,
     ProductoDAO, CompraDAO, ServicioDAO, UsuarioDAO
@@ -458,3 +458,110 @@ class ReporteService:
                 "total_comprobantes": len(ventas)
             }
         }
+
+
+# =============================================================================
+# CONTROL: CatalogoService (CUS Registrar Servicio en Catálogo)
+# Actor: :Administrador | Límite: :FormServicio | Control: :CatalogoService | Entidad: :Servicio
+# =============================================================================
+class CatalogoService:
+    def __init__(self, servicio_dao: ServicioDAO):
+        self.servicio_dao = servicio_dao
+
+    def obtener_categorias(self) -> List[str]:
+        """Paso 3 y 4 del Diagrama de Secuencia: Cargar categorías de tratamientos y retornar categorías activas del spa."""
+        return [
+            "Spa & Bienestar",
+            "Cosmiatría Facial",
+            "Cuidado Capilar",
+            "Manos & Pies",
+            "Masajes & Cromoterapia",
+            "Tratamientos Corporales"
+        ]
+
+    def listar_servicios(self) -> List[dict]:
+        return [s.to_dict() for s in self.servicio_dao.find_all()]
+
+    def registrar_servicio(self, data: dict) -> Dict[str, Any]:
+        """
+        CUS Registrar Servicio en Catálogo según Diagrama de Secuencia Oficial BCE:
+        - Paso 8: Validar datos y tarifa positiva
+        - Paso 9: Verificar no duplicidad de servicio
+        - [Datos Válidos y Tarifa Positiva]: Pasos 10-13 (Guardar en BD, confirmar y mostrar)
+        - [Tarifa Inválida o Campos Incompletos]: Pasos 14-15 (Notificar error y mostrar alerta)
+        """
+        nombre = str(data.get("nombre", "")).strip()
+        categoria = str(data.get("categoria", "Spa & Bienestar")).strip()
+        cabina = str(data.get("cabina", "Cabina Estándar")).strip()
+        comision = float(data.get("comision", 25.0))
+
+        # Paso 8: Validar datos y tarifa positiva
+        try:
+            precio = float(data.get("precio", 0.0))
+            duracion = int(data.get("duracion", 0))
+        except (ValueError, TypeError):
+            # Paso 14: Notificar error de validación de tarifa o duración
+            return {
+                "success": False,
+                "paso": 14,
+                "error": "Notificar error de validación de tarifa o duración: La tarifa (precio) y la duración deben ser valores numéricos válidos mayores a cero.",
+                "mensaje": "Paso 14: Notificar error de validación de tarifa o duración",
+                "alerta": "Paso 15: Mostrar alerta de datos inválidos en pantalla. Ingrese una tarifa mayor a 0 y duración válida.",
+                "status_code": 400
+            }
+
+        if not nombre or precio <= 0 or duracion <= 0:
+            # Paso 14: Notificar error de validación de tarifa o duración
+            return {
+                "success": False,
+                "paso": 14,
+                "error": "Notificar error de validación de tarifa o duración: El nombre es obligatorio, y tanto la tarifa como la duración deben ser positivas mayores a cero.",
+                "mensaje": "Paso 14: Notificar error de validación de tarifa o duración",
+                "alerta": "Paso 15: Mostrar alerta de datos inválidos en pantalla. Verifique que la tarifa y duración sean mayores a 0.",
+                "status_code": 400
+            }
+
+        # Paso 9: Verificar no duplicidad de servicio
+        existente = self.servicio_dao.find_by_nombre(nombre)
+        if existente:
+            # Paso 14: Notificar error de validación
+            return {
+                "success": False,
+                "paso": 14,
+                "error": f"Notificar rechazo por duplicidad: Ya existe un servicio registrado con el nombre '{nombre}' en el catálogo del spa.",
+                "mensaje": f"Paso 14: Notificar rechazo por duplicidad de servicio: '{nombre}' ya se encuentra registrado.",
+                "alerta": f"Paso 15: Mostrar alerta de datos inválidos en pantalla: El servicio '{nombre}' ya existe.",
+                "status_code": 409
+            }
+
+        # → [Datos Válidos y Tarifa Positiva]:
+        # Paso 10: Guardar nuevo servicio en base de datos
+        nuevo = Servicio(
+            codigservicio="",
+            nombre=nombre,
+            categoria=categoria,
+            preciobase=precio,
+            duracionminutos=duracion,
+            cabinarequerida=cabina,
+            porcentajecomision=comision,
+            estadoactivo=True
+        )
+
+        try:
+            guardado = self.servicio_dao.save(nuevo)
+            # Paso 11: Confirmar almacenamiento en catálogo
+            # Paso 12: Notificar servicio registrado con éxito
+            return {
+                "success": True,
+                "paso": 12,
+                "message": f"Paso 12: Notificar servicio registrado con éxito: '{nombre}' (Tarifa S/ {precio:.2f}) almacenado en catálogo.",
+                "confirmacion": "Confirmar almacenamiento en catálogo oficial",
+                "servicio": guardado.to_dict(),
+                "status_code": 201
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Error al guardar servicio en base de datos: {str(e)}",
+                "status_code": 500
+            }

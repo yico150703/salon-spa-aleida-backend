@@ -26,7 +26,7 @@ from daos.repositories import (
     ProductoDAO, CompraDAO, ServicioDAO, UsuarioDAO
 )
 from services.business_services import (
-    CitaService, VentaService, CajaService, ReporteService
+    CitaService, VentaService, CajaService, ReporteService, CatalogoService
 )
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -45,6 +45,7 @@ cita_service = CitaService(cita_dao, cliente_dao)
 venta_service = VentaService(venta_dao, cita_dao, caja_dao)
 caja_service = CajaService(caja_dao)
 reporte_service = ReporteService(cita_dao, venta_dao, caja_dao)
+catalogo_service = CatalogoService(servicio_dao)
 
 # =============================================================================
 # MONITOREO Y SALUD DEL SERVICIO (ÁREA DE RECEPCIÓN)
@@ -403,25 +404,19 @@ def change_cita_estado(cita_id):
 # =============================================================================
 @api_bp.route("/catalogo", methods=["GET"])
 def get_catalogo():
-    return jsonify([s.to_dict() for s in servicio_dao.find_all()])
+    return jsonify(catalogo_service.listar_servicios())
 
 @api_bp.route("/servicios", methods=["GET"])
 def get_servicios():
-    return jsonify([s.to_dict() for s in servicio_dao.find_all()])
+    return jsonify(catalogo_service.listar_servicios())
 
 @api_bp.route("/servicios/categorias", methods=["GET"])
 def get_categorias_servicios():
-    """Paso 3 y 4 de CUS06: Cargar y retornar categorías activas del spa."""
+    """Paso 3 y 4 del Diagrama de Secuencia: Cargar categorías de tratamientos y retornar categorías activas."""
     return jsonify({
         "success": True,
-        "categorias": [
-            "Spa & Bienestar",
-            "Cosmiatría Facial",
-            "Cuidado Capilar",
-            "Manos & Pies",
-            "Masajes & Cromoterapia",
-            "Tratamientos Corporales"
-        ]
+        "mensaje": "Paso 4: Retornar categorías activas del spa",
+        "categorias": catalogo_service.obtener_categorias()
     }), 200
 
 @api_bp.route("/productos", methods=["GET"])
@@ -430,57 +425,16 @@ def get_productos():
 
 @api_bp.route("/servicios", methods=["POST"])
 def post_servicio():
+    """Pasos 8 a 15 del Diagrama de Secuencia BCE: Validar tarifa positiva, no duplicidad y persistir en BD."""
     data = request.json or {}
-    nombre = str(data.get("nombre", "")).strip()
-    categoria = str(data.get("categoria", "Spa & Bienestar")).strip()
-    
-    try:
-        duracion = int(data.get("duracion", 0))
-    except (ValueError, TypeError):
-        duracion = 0
+    res = catalogo_service.registrar_servicio(data)
+    status_code = res.get("status_code", 201 if res.get("success") else 400)
+    return jsonify(res), status_code
 
-    try:
-        precio = float(data.get("precio", 0.0))
-    except (ValueError, TypeError):
-        precio = 0.0
-
-    try:
-        comision = int(data.get("comision", 25))
-    except (ValueError, TypeError):
-        comision = 25
-
-    # Paso 8 de CUS06: Validar datos y tarifa positiva (> 0)
-    if not nombre or not categoria or precio <= 0 or duracion <= 0:
-        return jsonify({
-            "success": False,
-            "error": "Notificar error de validación de tarifa o duración: La tarifa (precio) y la duración deben ser valores positivos mayores a cero y los campos obligatorios deben estar completos."
-        }), 400
-
-    # Paso 9 de CUS06: Verificar no duplicidad de servicio en catálogo
-    existente = servicio_dao.find_by_nombre(nombre)
-    if existente:
-        return jsonify({
-            "success": False,
-            "error": f"Rechazo por duplicidad: Ya existe un servicio registrado con el nombre '{nombre}' en el catálogo del spa."
-        }), 409
-
-    # Pasos 10, 11 y 12: Guardar nuevo servicio, confirmar almacenamiento y notificar éxito
-    nuevo = Servicio(
-        id=0,
-        nombre=nombre,
-        categoria=categoria,
-        duracion=duracion,
-        precio=precio,
-        comision=comision,
-        activo=True
-    )
-    guardado = servicio_dao.save(nuevo)
-    return jsonify({
-        "success": True,
-        "mensaje": "Confirmación de almacenamiento en catálogo",
-        "confirmacion": "Servicio registrado con éxito",
-        "servicio": guardado.to_dict()
-    }), 201
+@api_bp.route("/catalogo", methods=["POST"])
+def post_catalogo():
+    """Alias para registro de servicio en catálogo."""
+    return post_servicio()
 
 # =============================================================================
 # CUS07: APERTURAR TURNO DE CAJA
