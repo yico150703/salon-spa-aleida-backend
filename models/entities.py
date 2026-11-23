@@ -789,7 +789,7 @@ class CajaSesion:
                  turno: str = "Turno Mañana", montoapertura: float = 0.0,
                  fechahoraapertura: str = "", montocierresistema: Optional[float] = None,
                  montocierrereal: Optional[float] = None, diferencia: Optional[float] = None,
-                 estadosesion: str = "Abierta", **kwargs):
+                 estadosesion: Optional[str] = None, **kwargs):
         self.codigsesion = codigsesion or kwargs.get('codigo_sesion', 'SES-001')
         self.cajero = cajero
         self.turno = turno
@@ -798,7 +798,7 @@ class CajaSesion:
         self.montocierresistema = montocierresistema if montocierresistema is not None else kwargs.get('saldo_teorico', self.montoapertura)
         self.montocierrereal = montocierrereal or kwargs.get('monto_cierre_real')
         self.diferencia = diferencia if diferencia is not None else kwargs.get('diferencia', 0.0)
-        self.estadosesion = estadosesion or kwargs.get('estado', 'Abierta')
+        self.estadosesion = estadosesion if estadosesion is not None else kwargs.get('estado', 'Abierta')
         self.id = kwargs.get('id', 1)
         self.fecha = kwargs.get('fecha', datetime.now().strftime("%Y-%m-%d"))
         self.efectivo = kwargs.get('efectivo', 0.0)

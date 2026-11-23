@@ -553,6 +553,7 @@ class CajaDAO(BaseDAO):
                     saldo_teorico=saldo_teorico,
                     arqueo_fisico=arqueo_fisico,
                     diferencia=diferencia,
+                    estadosesion=estado,
                     estado=estado,
                     turno=turno
                 )
@@ -594,12 +595,18 @@ class CajaDAO(BaseDAO):
             conn = get_connection()
             cur = get_cursor(conn)
             cod_mov = f"MOV-{int(datetime.now().timestamp() * 1000) % 10000000}"
-            ph = self._ph(7)
-            cur.execute(
-                f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES ({ph});',
-                (cod_mov, cod_sesion, tipo, detalle, monto, datetime.now(), "Administrador")
-            )
-            if not is_postgres():
+            now_sql = "NOW()" if is_postgres() else "?"
+            if is_postgres():
+                cur.execute(
+                    f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES (%s, %s, %s, %s, %s, NOW(), %s);',
+                    (cod_mov, cod_sesion, tipo, detalle, monto, "Administrador")
+                )
+            else:
+                ph = self._ph(7)
+                cur.execute(
+                    f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES ({ph});',
+                    (cod_mov, cod_sesion, tipo, detalle, monto, datetime.now(), "Administrador")
+                )
                 conn.commit()
             conn.close()
         except Exception as e:
@@ -614,12 +621,17 @@ class CajaDAO(BaseDAO):
             cod_sesion = r["codigsesion"] if r else "SES-001"
 
             cod_mov = f"MOV-{int(datetime.now().timestamp() * 1000) % 10000000}"
-            ph = self._ph(7)
-            cur.execute(
-                f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES ({ph});',
-                (cod_mov, cod_sesion, tipo, detalle, monto, datetime.now(), "Administrador")
-            )
-            if not is_postgres():
+            if is_postgres():
+                cur.execute(
+                    f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES (%s, %s, %s, %s, %s, NOW(), %s);',
+                    (cod_mov, cod_sesion, tipo, detalle, monto, "Administrador")
+                )
+            else:
+                ph = self._ph(7)
+                cur.execute(
+                    f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES ({ph});',
+                    (cod_mov, cod_sesion, tipo, detalle, monto, datetime.now(), "Administrador")
+                )
                 conn.commit()
             conn.close()
         except Exception as e:

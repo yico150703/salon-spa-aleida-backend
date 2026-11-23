@@ -547,8 +547,8 @@ class CajaService:
         cur = get_cursor(conn)
         ph = "%s" if is_postgres() else "?"
         cur.execute(
-            f'INSERT INTO "CajaSesion" (codigsesion, cajero, turno, montoapertura, fechahoraapertura, montocierresistema, estadosesion) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});',
-            (cod_sesion, responsable, turno, monto_inicial, now_dt, monto_inicial, "Abierta")
+            f'INSERT INTO "CajaSesion" (codigsesion, cajero, turno, montoapertura, fechahoraapertura, montocierresistema, estadosesion) VALUES ({ph}, {ph}, {ph}, {ph}, NOW(), {ph}, {ph});',
+            (cod_sesion, responsable, turno, monto_inicial, monto_inicial, "Abierta")
         )
         if not is_postgres():
             conn.commit()
