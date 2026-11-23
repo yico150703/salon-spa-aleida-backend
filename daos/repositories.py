@@ -339,6 +339,14 @@ class VentaDAO(BaseDAO):
             fecha_str = datetime.now().strftime("%Y-%m-%d")
             hora_str = datetime.now().strftime("%H:%M")
             dni_c = venta.dni_cliente if venta.dni_cliente else "72819382"
+            try:
+                cur.execute('SELECT dni FROM "Cliente" WHERE dni = %s;', (dni_c,))
+                if not cur.fetchone():
+                    cur.execute('SELECT dni FROM "Cliente" LIMIT 1;')
+                    c_fallback = cur.fetchone()
+                    dni_c = c_fallback["dni"] if c_fallback else None
+            except Exception:
+                pass
             cur.execute(
                 f'INSERT INTO "VentaComprobante" (numerocomprobante, tipocomprobante, serie, fechaemision, horaemision, dni_cliente, subtotal, igv, descuentototal, totalneto, estadocomprobante, notacredito) '
                 f"VALUES ({ph});",
@@ -413,50 +421,71 @@ class VentaDAO(BaseDAO):
 
 
 class CajaDAO(BaseDAO):
-    _active_caja: Optional[Caja] = None
-
     def get_caja_actual(self) -> Caja:
-        if CajaDAO._active_caja is not None:
-            return CajaDAO._active_caja
-
         try:
             conn = get_connection()
             cur = get_cursor(conn)
             cur.execute('SELECT codigsesion, cajero, turno, montoapertura, fechahoraapertura, montocierresistema, montocierrereal, diferencia, estadosesion FROM "CajaSesion" ORDER BY fechahoraapertura DESC LIMIT 1;')
             r = cur.fetchone()
-            conn.close()
             if r:
-                apertura = float(r["montoapertura"] or 150.0)
-                saldo = float(r["montocierresistema"] or apertura)
-                c = Caja(
+                cod_sesion = r["codigsesion"]
+                apertura = float(r["montoapertura"] or 0.0)
+                estado = r["estadosesion"] or "Abierta"
+                cajero = r["cajero"] or "Personal de Caja"
+                turno = r["turno"] or "Turno Mañana"
+                fecha = str(r["fechahoraapertura"]).split()[0] if r["fechahoraapertura"] else datetime.now().strftime("%Y-%m-%d")
+                arqueo_fisico = float(r["montocierrereal"]) if r["montocierrereal"] is not None else None
+                diferencia = float(r["diferencia"]) if r["diferencia"] is not None else None
+
+                # Calcular efectivo, digital y egresos en caliente desde "MovimientoCaja"
+                efectivo = 0.0
+                digital = 0.0
+                egresos = 0.0
+                try:
+                    cur.execute('SELECT tipomovimiento, concepto, monto FROM "MovimientoCaja" ORDER BY fechahora ASC;')
+                    for mrow in cur.fetchall():
+                        tipo = str(mrow["tipomovimiento"] or "").lower()
+                        conc = str(mrow["concepto"] or "").lower()
+                        m = float(mrow["monto"] or 0.0)
+                        if tipo == "ingreso":
+                            if "efectivo" in conc:
+                                efectivo += m
+                            else:
+                                digital += m
+                        elif tipo == "egreso" or (tipo == "reversión" and m < 0):
+                            egresos += abs(m)
+                except Exception:
+                    pass
+
+                saldo_teorico = round(apertura + efectivo + digital - egresos, 2)
+                conn.close()
+
+                return Caja(
                     id=1,
-                    codigo_sesion=r["codigsesion"],
-                    cajero=r["cajero"] or "Personal de Caja",
-                    fecha=str(r["fechahoraapertura"]).split()[0] if r["fechahoraapertura"] else datetime.now().strftime("%Y-%m-%d"),
+                    codigo_sesion=cod_sesion,
+                    cajero=cajero,
+                    fecha=fecha,
                     apertura=apertura,
-                    efectivo=0.0,
-                    digital=0.0,
-                    egresos=0.0,
-                    saldo_teorico=saldo,
-                    arqueo_fisico=float(r["montocierrereal"]) if r["montocierrereal"] is not None else None,
-                    diferencia=float(r["diferencia"]) if r["diferencia"] is not None else None,
-                    estado=r["estadosesion"] or "Abierta",
-                    turno=r["turno"] or "Turno Mañana"
+                    efectivo=efectivo,
+                    digital=digital,
+                    egresos=egresos,
+                    saldo_teorico=saldo_teorico,
+                    arqueo_fisico=arqueo_fisico,
+                    diferencia=diferencia,
+                    estado=estado,
+                    turno=turno
                 )
-                CajaDAO._active_caja = c
-                return c
+            conn.close()
         except Exception as e:
             logger.error("Error en CajaDAO.get_caja_actual: %s", e)
 
-        c = Caja(1, datetime.now().strftime("%Y-%m-%d"), 150.0, 0.0, 0.0, 0.0, 150.0)
-        CajaDAO._active_caja = c
-        return c
+        return Caja(1, datetime.now().strftime("%Y-%m-%d"), 300.0, 0.0, 0.0, 0.0, 300.0)
 
     def get_movimientos(self) -> List[dict]:
         try:
             conn = get_connection()
             cur = get_cursor(conn)
-            cur.execute('SELECT codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor FROM "MovimientoCaja" ORDER BY fechahora ASC;')
+            cur.execute('SELECT codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor FROM "MovimientoCaja" ORDER BY fechahora DESC;')
             rows = cur.fetchall()
             conn.close()
             return [
@@ -478,11 +507,15 @@ class CajaDAO(BaseDAO):
         try:
             conn = get_connection()
             cur = get_cursor(conn)
+            cur.execute('SELECT codigsesion FROM "CajaSesion" ORDER BY fechahoraapertura DESC LIMIT 1;')
+            r = cur.fetchone()
+            cod_sesion = r["codigsesion"] if r else "SES-001"
+
             cod_mov = f"MOV-{int(datetime.now().timestamp() * 1000) % 10000000}"
             ph = self._ph(7)
             cur.execute(
                 f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES ({ph});',
-                (cod_mov, "SES-001", tipo, detalle, monto, datetime.now(), "Administrador")
+                (cod_mov, cod_sesion, tipo, detalle, monto, datetime.now(), "Administrador")
             )
             if not is_postgres():
                 conn.commit()
@@ -491,14 +524,14 @@ class CajaDAO(BaseDAO):
             logger.error("Error en CajaDAO.add_movimiento: %s", e)
 
     def update_caja(self, caja: Caja) -> Caja:
-        CajaDAO._active_caja = caja
         try:
             conn = get_connection()
             cur = get_cursor(conn)
             ph = "%s" if is_postgres() else "?"
+            cod = caja.codigo_sesion or "SES-001"
             cur.execute(
-                f'UPDATE "CajaSesion" SET montoapertura = {ph}, montocierresistema = {ph}, montocierrereal = {ph}, diferencia = {ph}, estadosesion = {ph}, turno = {ph} WHERE codigsesion = {ph};',
-                (caja.apertura, caja.saldo_teorico, caja.arqueo_fisico, caja.diferencia, caja.estado, caja.turno, "SES-001")
+                f'UPDATE "CajaSesion" SET montoapertura = {ph}, montocierresistema = {ph}, montocierrereal = {ph}, diferencia = {ph}, estadosesion = {ph}, turno = {ph}, cajero = {ph} WHERE codigsesion = {ph};',
+                (caja.apertura, caja.saldo_teorico, caja.arqueo_fisico, caja.diferencia, caja.estado, caja.turno, caja.cajero or "Personal de Caja", cod)
             )
             if not is_postgres():
                 conn.commit()
