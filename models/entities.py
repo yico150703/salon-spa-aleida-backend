@@ -424,6 +424,8 @@ class Usuario:
     def CodigUsuario(self): return self.codigusuario
     @property
     def cod_usuario(self): return self.codigusuario
+    @cod_usuario.setter
+    def cod_usuario(self, val): self.codigusuario = val
     @property
     def PasswordHash(self): return self.passwordhash
     @property

@@ -274,25 +274,29 @@ class CajaService:
         responsable = apertura_data.get("responsable", "Personal de Mostrador")
         observaciones = apertura_data.get("observaciones", "Apertura estándar")
 
-        caja = self.caja_dao.get_caja_actual()
-        caja.apertura = monto_inicial
-        caja.efectivo = 0.0
-        caja.digital = 0.0
-        caja.egresos = 0.0
-        caja.saldo_teorico = monto_inicial
-        caja.arqueo_fisico = None
-        caja.diferencia = None
-        caja.estado = "Abierta"
-        caja.turno = turno
-        caja.fecha = datetime.now().strftime("%Y-%m-%d")
-        self.caja_dao.update_caja(caja)
+        cod_sesion = f"SES-{int(datetime.now().timestamp()) % 1000000:06d}"
+        now_dt = datetime.now()
 
-        self.caja_dao.add_movimiento(
+        from database import get_connection, get_cursor, is_postgres
+        conn = get_connection()
+        cur = get_cursor(conn)
+        ph = "%s" if is_postgres() else "?"
+        cur.execute(
+            f'INSERT INTO "CajaSesion" (codigsesion, cajero, turno, montoapertura, fechahoraapertura, montocierresistema, estadosesion) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph});',
+            (cod_sesion, responsable, turno, monto_inicial, now_dt, monto_inicial, "Abierta")
+        )
+        if not is_postgres():
+            conn.commit()
+        conn.close()
+
+        self.caja_dao.add_movimiento_sesion(
+            cod_sesion=cod_sesion,
             tipo="Apertura",
             monto=monto_inicial,
             detalle=f"Fondo de sencillo inicial ({turno}) por {responsable}. {observaciones}"
         )
 
+        caja = self.caja_dao.get_caja_actual()
         caja_dict = caja.to_dict()
         caja_dict["total_teorico"] = caja.saldo_teorico
         return {

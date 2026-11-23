@@ -437,12 +437,13 @@ class CajaDAO(BaseDAO):
                 arqueo_fisico = float(r["montocierrereal"]) if r["montocierrereal"] is not None else None
                 diferencia = float(r["diferencia"]) if r["diferencia"] is not None else None
 
-                # Calcular efectivo, digital y egresos en caliente desde "MovimientoCaja"
+                # Calcular efectivo, digital y egresos en caliente únicamente de la sesión actual
                 efectivo = 0.0
                 digital = 0.0
                 egresos = 0.0
                 try:
-                    cur.execute('SELECT tipomovimiento, concepto, monto FROM "MovimientoCaja" ORDER BY fechahora ASC;')
+                    ph = "%s" if is_postgres() else "?"
+                    cur.execute(f'SELECT tipomovimiento, concepto, monto FROM "MovimientoCaja" WHERE codigsesion = {ph} ORDER BY fechahora ASC;', (cod_sesion,))
                     for mrow in cur.fetchall():
                         tipo = str(mrow["tipomovimiento"] or "").lower()
                         conc = str(mrow["concepto"] or "").lower()
@@ -485,7 +486,12 @@ class CajaDAO(BaseDAO):
         try:
             conn = get_connection()
             cur = get_cursor(conn)
-            cur.execute('SELECT codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor FROM "MovimientoCaja" ORDER BY fechahora DESC;')
+            cur.execute('SELECT codigsesion FROM "CajaSesion" ORDER BY fechahoraapertura DESC LIMIT 1;')
+            r = cur.fetchone()
+            cod_sesion = r["codigsesion"] if r else "SES-001"
+
+            ph = "%s" if is_postgres() else "?"
+            cur.execute(f'SELECT codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor FROM "MovimientoCaja" WHERE codigsesion = {ph} ORDER BY fechahora DESC;', (cod_sesion,))
             rows = cur.fetchall()
             conn.close()
             return [
@@ -502,6 +508,22 @@ class CajaDAO(BaseDAO):
         except Exception as e:
             logger.error("Error en CajaDAO.get_movimientos: %s", e)
             return []
+
+    def add_movimiento_sesion(self, cod_sesion: str, tipo: str, monto: float, detalle: str):
+        try:
+            conn = get_connection()
+            cur = get_cursor(conn)
+            cod_mov = f"MOV-{int(datetime.now().timestamp() * 1000) % 10000000}"
+            ph = self._ph(7)
+            cur.execute(
+                f'INSERT INTO "MovimientoCaja" (codigmovimiento, codigsesion, tipomovimiento, concepto, monto, fechahora, autorizadopor) VALUES ({ph});',
+                (cod_mov, cod_sesion, tipo, detalle, monto, datetime.now(), "Administrador")
+            )
+            if not is_postgres():
+                conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error("Error en CajaDAO.add_movimiento_sesion: %s", e)
 
     def add_movimiento(self, tipo: str, monto: float, detalle: str):
         try:
@@ -730,13 +752,17 @@ class UsuarioDAO(BaseDAO):
             parts = (user.nombre or "").split(" ", 1)
             nombres = parts[0]
             apellidos = user.apellidos if user.apellidos else (parts[1] if len(parts) > 1 else "")
+            cod_usr = user.cod_usuario
+            if not cod_usr or cod_usr == "USR-001":
+                cod_usr = f"USR-{int(datetime.now().timestamp() * 1000) % 10000000:07d}"
             cur.execute(
                 f'INSERT INTO "Usuario" (username, codigusuario, passwordhash, nombres, apellidos, dni, rol, turno, celular, email, estado) VALUES ({ph});',
-                (user.usuario, user.cod_usuario or "USR-001", user.password_temporal or "1234", nombres, apellidos, user.dni, user.rol, user.turno or "Turno Mañana", user.telefono or user.celular, user.email, user.activo)
+                (user.usuario, cod_usr, user.password_temporal or "1234", nombres, apellidos, user.dni, user.rol, user.turno or "Turno Mañana", user.telefono or user.celular, user.email, user.activo)
             )
             if not is_postgres():
                 conn.commit()
             conn.close()
+            user.cod_usuario = cod_usr
             return user
         except Exception as e:
             logger.error("Error en UsuarioDAO.save: %s", e)
